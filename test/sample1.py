@@ -1,4 +1,4 @@
-from cachelib import PickleCache, HistoryCache
+from FineCache import HistoryCache
 
 
 @HistoryCache()

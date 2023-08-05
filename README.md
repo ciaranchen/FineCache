@@ -12,7 +12,8 @@
 ## 使用方法
 
 ```python
-from cachelib import PickleCache
+from FineCache.cachelib import PickleCache
+
 
 @PickleCache()
 def run(a1, a2, k1="v1", k2="v2"):

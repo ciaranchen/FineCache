@@ -3,10 +3,9 @@ import pickle
 import shutil
 from dataclasses import dataclass
 from functools import wraps
-from shutil import copyfile
 from typing import Tuple, Callable, Dict, Any
 
-from cached_call import CachedCall
+from .cached_call import CachedCall
 import os
 import json
 
