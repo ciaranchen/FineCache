@@ -34,8 +34,7 @@ class CachedCall:
 
     @property
     def arg_lst(self):
-        return [self.arg2hash(a,
-                              self.args_hash[i] if self.args_hash and len(self.args_hash) > i else None)
+        return [self.arg2hash(a, self.args_hash[i] if self.args_hash and len(self.args_hash) > i else None)
                 for i, a in enumerate(self.args)]
 
     @property

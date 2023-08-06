@@ -1,9 +1,12 @@
 import inspect
 import pickle
+import re
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from functools import wraps
 from typing import Tuple, Callable, Dict, Any
+from zipfile import ZipFile, ZIP_DEFLATED
 
 from .cached_call import CachedCall
 import os
@@ -24,7 +27,7 @@ class BaseCache:
     args_hash: Tuple[Callable] = None
     kwargs_hash: Dict[str, Callable] = None
 
-    def __call__(self, func):
+    def cache(self, func):
         @wraps(func)
         def _get_result(*args, **kwargs):
             call = CachedCall(func, args, kwargs)
@@ -114,20 +117,10 @@ class PickleCache(BaseCache):
             return False
 
     def exists(self, call: CachedCall):
-        """
-        判断缓存文件是否存在
-        :param call:
-        :return:
-        """
         filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
         return os.path.exists(filename) and os.path.isfile(filename)
 
     def get(self, call: CachedCall) -> Any:
-        """
-        从缓存文件读取函数调用的信息
-        :param call:
-        :return:
-        """
         filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
         with open(filename, 'rb') as fp:
             data = pickle.load(fp)
@@ -158,15 +151,30 @@ class PickleCache(BaseCache):
         }
 
     def set(self, call: CachedCall):
-        """
-        存储内容
-        :param call:
-        :return:
-        """
         filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
         content = self._construct_content(call)
+        logger.debug(content)
         with open(filename, 'wb') as fp:
             pickle.dump(content, fp)
+
+
+@dataclass
+class VersionConfig:
+    version: int = 1
+
+    def increment(self):
+        self.version += 1
+
+    def save_to_file(self, filename):
+        with open(filename, 'wb') as f:
+            pickle.dump(self.version, f)
+
+    @classmethod
+    def load_from_file(cls, filename):
+        with open(filename, 'rb') as f:
+            version = pickle.load(f)
+        new_instance = cls(version)
+        return new_instance
 
 
 class HistoryCache(PickleCache):
@@ -176,9 +184,10 @@ class HistoryCache(PickleCache):
 
     def __init__(self, base_path=None, tracking_files=None, cfg_path=None):
         self.tracking_files = tracking_files if tracking_files else []
+        self.filename_template = 'v{ver}.{suffix}'
         super().__init__(base_path, cfg_path)
 
-    def __call__(self, func):
+    def cache(self, func: Callable) -> Callable:
         @wraps(func)
         def _get_result(*args, **kwargs):
             call = CachedCall(func, args, kwargs)
@@ -194,23 +203,57 @@ class HistoryCache(PickleCache):
     def set(self, call):
         path = os.path.join(self.base_path, self.config.get_id(call))
         os.makedirs(path, exist_ok=True)
-        json_filename = os.path.join(path, 'function.json')
-        content = self._construct_content(call)
-        content.update({
-            'func': call.func.__qualname__
-            # 'version': self._get_lastest_version()
-            # 'runtime': '',
-        })
-        with open(json_filename, 'w') as fp:
-            json.dump(content, fp)
+        version_path = os.path.join(path, '.version.txt')
+
+        version_config = VersionConfig() if not os.path.exists(version_path) else VersionConfig.load_from_file(
+            version_path)
+
+        old_filename = self.filename_template.format(ver=version_config.version, suffix='py')
+        old_path = os.path.join(path, old_filename)
+        # 若存在旧文件，则存在新文件，否则直接存在旧文件
+        if os.path.exists(old_path):
+            with open(old_path, encoding='utf-8') as fp:
+                lines = fp.readlines()
+                old_code = ''.join(lines[1:])
+            # 若现有代码与历史代码不一致
+            if inspect.getsource(call.func) != old_code:
+                # 保存结果到新的版本
+                version_config.increment()
+            else:
+                # 否则无需保存结果
+                return
+        version_config.save_to_file(version_path)
 
         # Save function code
-        func_code_filename = os.path.join(path, 'function.py')
+        func_code_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='py'))
         src_filename = inspect.getsourcefile(call.func)
         lines, line_num = inspect.getsourcelines(call.func)
         with open(func_code_filename, 'w') as fp:
-            fp.write('# {} L{}\n'.format(src_filename, line_num))
+            fp.write(f'# {src_filename} L{line_num} V{version_config.version}\n')
             fp.writelines(lines)
 
-        for f in self.tracking_files:
-            shutil.copy(f, path)
+        json_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='json'))
+        content = self._construct_content(call)
+        content.update({
+            'module': call.func.__module__,
+            'version': version_config.version,
+            'runtime': str(datetime.now()),
+        })
+        logger.debug(content)
+        with open(json_filename, 'w') as fp:
+            json.dump(content, fp)
+
+        if len(self.tracking_files) != 0:
+            zip_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='zip'))
+            with ZipFile(zip_filename, 'w') as zip_file:
+                for f in self.tracking_files:
+                    zip_file.write(f, compress_type=ZIP_DEFLATED)
+
+    def explore(self, func, args=(), kwargs=None, key=lambda x: x):
+        if kwargs is None:
+            kwargs = {}
+        call = CachedCall(func, args, kwargs)
+        path = os.path.join(self.base_path, self.config.get_id(call))
+        if not os.path.exists(path):
+            raise Exception(f"Could not explore: {func.__qualname__}(args={args}, kwargs={kwargs}), not exists {path}")
+        return [key(f[:-5]) for f in os.listdir(path) if f.endswith('json')]

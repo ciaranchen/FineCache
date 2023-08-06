@@ -14,8 +14,10 @@
 ```python
 from FineCache.cachelib import PickleCache
 
+pc = PickleCache()
 
-@PickleCache()
+
+@pc.cache
 def run(a1, a2, k1="v1", k2="v2"):
     """normal run function"""
     print(a1, a2, k1, k2)

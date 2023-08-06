@@ -1,7 +1,9 @@
 from FineCache import HistoryCache
 
+hc = HistoryCache(base_path='.cache')
 
-@HistoryCache()
+
+@hc.cache
 def run(a1, a2, k1="v1", k2="v2"):
     """
     example run function
@@ -16,3 +18,6 @@ print(res)
 print(run.__qualname__)
 print(run.__doc__)
 print(run.__module__)
+
+# hc.explore(run)
+print(hc.explore(run, (3,), {'a2': 4, 'k1': "v3"}))
