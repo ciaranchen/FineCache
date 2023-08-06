@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Tuple, Callable, Dict, Any
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from .cached_call import CachedCall
+from .CachedCall import CachedCall
 import os
 import json
 
@@ -27,15 +27,15 @@ class BaseCache:
     args_hash: Tuple[Callable] = None
     kwargs_hash: Dict[str, Callable] = None
 
-    def cache(self, func):
+    def cache(self, func: Callable) -> Callable:
         @wraps(func)
         def _get_result(*args, **kwargs):
             call = CachedCall(func, args, kwargs)
             if self.exists(call):
-                self.get(call)
+                return self.get(call)
             else:
                 self.set(call)
-            return call.result
+                return call.result
 
         return _get_result
 
@@ -86,12 +86,9 @@ class PickleCache(BaseCache):
         :param cfg_path: 配置文件的路径，主要用于指定保存文件的路径格式。
         """
         self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
-        # Load setting
         self.config = FilenameConfig()
-
-        # scan path exist:
-
         cfg_path = cfg_path if cfg_path else '.cache_config.json'
+        # Load setting
         self.config_path = None
         if cfg_path and os.path.exists(cfg_path):
             self.config_path = cfg_path
@@ -128,6 +125,7 @@ class PickleCache(BaseCache):
         logger.debug(data)
 
         n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'])
+        logger.debug(n_call.result)
         return n_call.result
 
     @staticmethod
@@ -205,10 +203,9 @@ class HistoryCache(PickleCache):
         os.makedirs(path, exist_ok=True)
         version_path = os.path.join(path, '.version.txt')
 
-        version_config = VersionConfig() if not os.path.exists(version_path) else VersionConfig.load_from_file(
-            version_path)
+        ver_conf = VersionConfig() if not os.path.exists(version_path) else VersionConfig.load_from_file(version_path)
 
-        old_filename = self.filename_template.format(ver=version_config.version, suffix='py')
+        old_filename = self.filename_template.format(ver=ver_conf.version, suffix='py')
         old_path = os.path.join(path, old_filename)
         # 若存在旧文件，则存在新文件，否则直接存在旧文件
         if os.path.exists(old_path):
@@ -218,25 +215,25 @@ class HistoryCache(PickleCache):
             # 若现有代码与历史代码不一致
             if inspect.getsource(call.func) != old_code:
                 # 保存结果到新的版本
-                version_config.increment()
+                ver_conf.increment()
             else:
                 # 否则无需保存结果
                 return
-        version_config.save_to_file(version_path)
+        ver_conf.save_to_file(version_path)
 
         # Save function code
-        func_code_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='py'))
+        func_code_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='py'))
         src_filename = inspect.getsourcefile(call.func)
         lines, line_num = inspect.getsourcelines(call.func)
         with open(func_code_filename, 'w') as fp:
-            fp.write(f'# {src_filename} L{line_num} V{version_config.version}\n')
+            fp.write(f'# {src_filename} L{line_num} V{ver_conf.version}\n')
             fp.writelines(lines)
 
-        json_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='json'))
+        json_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='json'))
         content = self._construct_content(call)
         content.update({
             'module': call.func.__module__,
-            'version': version_config.version,
+            'version': ver_conf.version,
             'runtime': str(datetime.now()),
         })
         logger.debug(content)
@@ -244,7 +241,7 @@ class HistoryCache(PickleCache):
             json.dump(content, fp)
 
         if len(self.tracking_files) != 0:
-            zip_filename = os.path.join(path, self.filename_template.format(ver=version_config.version, suffix='zip'))
+            zip_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='zip'))
             with ZipFile(zip_filename, 'w') as zip_file:
                 for f in self.tracking_files:
                     zip_file.write(f, compress_type=ZIP_DEFLATED)
@@ -256,4 +253,4 @@ class HistoryCache(PickleCache):
         path = os.path.join(self.base_path, self.config.get_id(call))
         if not os.path.exists(path):
             raise Exception(f"Could not explore: {func.__qualname__}(args={args}, kwargs={kwargs}), not exists {path}")
-        return [key(f[:-5]) for f in os.listdir(path) if f.endswith('json')]
+        return [key(os.path.join(path, f[:-5])) for f in os.listdir(path) if f.endswith('json')]
