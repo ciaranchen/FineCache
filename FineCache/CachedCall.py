@@ -32,15 +32,13 @@ class CachedCall:
     args_hash: Tuple[Callable] = None
     kwargs_hash: Dict[str, Callable] = None
 
-    @property
-    def arg_lst(self):
-        return [self.arg2hash(a, self.args_hash[i] if self.args_hash and len(self.args_hash) > i else None)
-                for i, a in enumerate(self.args)]
+    def get_args_hash(self, i):
+        return self.arg2hash(self.args[i],
+                             self.args_hash[i] if self.args_hash and len(self.args_hash) > i else None)
 
-    @property
-    def kwarg_lst(self):
-        return {k: self.arg2hash(v, self.kwargs_hash[k] if self.kwargs_hash and k in self.kwargs_hash else None)
-                for k, v in self.kwargs.items()}
+    def get_kwargs_hash(self, k):
+        return self.arg2hash(self.kwargs[k],
+                             self.kwargs_hash[k] if self.kwargs_hash and k in self.kwargs_hash else None)
 
     def arg2hash(self, arg, hash_func):
         if hash_func:

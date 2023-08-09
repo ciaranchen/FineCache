@@ -30,7 +30,7 @@ class BaseCache:
     def cache(self, func: Callable) -> Callable:
         @wraps(func)
         def _get_result(*args, **kwargs):
-            call = CachedCall(func, args, kwargs)
+            call = CachedCall(func, args, kwargs, args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
             if self.exists(call):
                 return self.get(call)
             else:
@@ -39,10 +39,10 @@ class BaseCache:
 
         return _get_result
 
-    def exists(self, call):
+    def exists(self, call: CachedCall):
         pass
 
-    def get(self, call):
+    def get(self, call: CachedCall):
         pass
 
     def set(self, call):
@@ -55,6 +55,19 @@ class FilenameConfig:
     join_dict: str = ';'
     join_key_value: str = '-'
     template_string: str = "{func_name}@[{args}]@{kwargs}"
+    config_path: str = None
+
+    def set_path(self, base_path=None, cfg_path=None):
+        cfg_path = cfg_path if cfg_path else '.cache_config.json'
+        # Load setting
+        if cfg_path and os.path.exists(cfg_path):
+            self.config_path = cfg_path
+        elif cfg_path and base_path and os.path.exists(os.path.join(base_path, cfg_path)):
+            self.config_path = os.path.join(base_path, cfg_path)
+        if self.config_path:
+            with open(self.config_path) as config_fp:
+                cfg = json.load(config_fp)
+            self.load(cfg)
 
     def load(self, cfg: Dict[str, str]):
         if 'join_args' in cfg:
@@ -72,33 +85,26 @@ class FilenameConfig:
         :param call:
         :return:
         """
-        arg_list, kwarg_list = call.arg_lst, call.kwarg_lst
+        arg_list = [call.get_args_hash(i) if PickleCache.is_picklable(a) else 'None' for i, a in enumerate(call.args)]
+        kwarg_list = {k: call.get_kwargs_hash(k) if PickleCache.is_picklable(v) else 'None' for k, v in
+                      call.kwargs.items()}
         args_string = self.join_args.join(arg_list)
         kwargs_string = self.join_dict.join([k + self.join_key_value + v for k, v in kwarg_list.items()])
-        return self.template_string.format(func_name=call.func.__qualname__, args=args_string, kwargs=kwargs_string)
+        return self.template_string.format(func_name=call.func.__name__, args=args_string, kwargs=kwargs_string)
 
 
 class PickleCache(BaseCache):
-    def __init__(self, base_path=None, cfg_path=None):
+    def __init__(self, base_path=None, cfg_path=None, args_hash=None, kwargs_hash=None):
         """
 
         :param base_path: 保存的文件夹，默认为当前文件夹。
         :param cfg_path: 配置文件的路径，主要用于指定保存文件的路径格式。
         """
+        super().__init__(args_hash, kwargs_hash)
         self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
+        os.makedirs(self.base_path, exist_ok=True)
         self.config = FilenameConfig()
-        cfg_path = cfg_path if cfg_path else '.cache_config.json'
-        # Load setting
-        self.config_path = None
-        if cfg_path and os.path.exists(cfg_path):
-            self.config_path = cfg_path
-        elif cfg_path and base_path and os.path.exists(os.path.join(base_path, cfg_path)):
-            self.config_path = os.path.join(base_path, cfg_path)
-
-        if self.config_path:
-            with open(self.config_path) as config_fp:
-                cfg = json.load(config_fp)
-            self.config.load(cfg)
+        self.config.set_path(base_path, cfg_path)
 
     @staticmethod
     def is_picklable(obj: Any) -> bool:
@@ -110,7 +116,7 @@ class PickleCache(BaseCache):
         try:
             pickle.dumps(obj)
             return True
-        except pickle.PicklingError:
+        except:
             return False
 
     def exists(self, call: CachedCall):
@@ -124,8 +130,8 @@ class PickleCache(BaseCache):
         assert call.func.__qualname__ == data['func']
         logger.debug(data)
 
-        n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'])
-        logger.debug(n_call.result)
+        n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'],
+                            args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
         return n_call.result
 
     @staticmethod
@@ -139,7 +145,7 @@ class PickleCache(BaseCache):
         kwargs = {k: v if PickleCache.is_picklable(v) else None for k, v in call.kwargs.items()}
         result = call.run()
         if not PickleCache.is_picklable(result):
-            raise Exception("not a picklable result...")
+            raise pickle.PickleError("not a picklable result...")
 
         return {
             'func': call.func.__qualname__,
@@ -175,20 +181,24 @@ class VersionConfig:
         return new_instance
 
 
-class HistoryCache(PickleCache):
+class HistoryCache(BaseCache):
     """
     这个类只保存函数代码和运行结果，内容可以直接查看。
     """
 
-    def __init__(self, base_path=None, tracking_files=None, cfg_path=None):
+    def __init__(self, base_path=None, tracking_files=None, cfg_path=None, args_hash=None, kwargs_hash=None):
+        super().__init__(args_hash, kwargs_hash)
+        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
+        os.makedirs(self.base_path, exist_ok=True)
+        self.config = FilenameConfig()
+        self.config.set_path(base_path, cfg_path)
         self.tracking_files = tracking_files if tracking_files else []
         self.filename_template = 'v{ver}.{suffix}'
-        super().__init__(base_path, cfg_path)
 
     def cache(self, func: Callable) -> Callable:
         @wraps(func)
         def _get_result(*args, **kwargs):
-            call = CachedCall(func, args, kwargs)
+            call = CachedCall(func, args, kwargs, args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
             self.set(call)
             return call.result
 
@@ -217,7 +227,8 @@ class HistoryCache(PickleCache):
                 # 保存结果到新的版本
                 ver_conf.increment()
             else:
-                # 否则无需保存结果
+                # 否则无需保存结果，只照常运行即可
+                call.run()
                 return
         ver_conf.save_to_file(version_path)
 
@@ -225,20 +236,20 @@ class HistoryCache(PickleCache):
         func_code_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='py'))
         src_filename = inspect.getsourcefile(call.func)
         lines, line_num = inspect.getsourcelines(call.func)
-        with open(func_code_filename, 'w') as fp:
+        with open(func_code_filename, 'w', encoding='utf-8') as fp:
             fp.write(f'# {src_filename} L{line_num} V{ver_conf.version}\n')
             fp.writelines(lines)
 
-        json_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='json'))
-        content = self._construct_content(call)
+        pickle_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='pk'))
+        content = PickleCache._construct_content(call)
         content.update({
             'module': call.func.__module__,
             'version': ver_conf.version,
             'runtime': str(datetime.now()),
         })
         logger.debug(content)
-        with open(json_filename, 'w') as fp:
-            json.dump(content, fp)
+        with open(pickle_filename, 'wb') as fp:
+            pickle.dump(content, fp)
 
         if len(self.tracking_files) != 0:
             zip_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='zip'))

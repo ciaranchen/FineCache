@@ -1,4 +1,4 @@
-from FineCache.cachelib import PickleCache
+from FineCache import PickleCache, HistoryCache
 
 pc = PickleCache()
 
@@ -14,4 +14,21 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
     return a3, a4, kr1, kr2
 
 
-print(func(*(3,), **{'a2': 4, 'k2': 'v3'}))
+func(3, a2=4, k2='v3')
+# print(func(*(3,), **{'a2': 4, 'k2': 'v3'}))
+
+
+hc = HistoryCache('.history')
+
+
+@hc.cache
+def tracking_func():
+    """
+    tracking function version 1
+    :return:
+    """
+    # change this line and rerun this function
+    return 0
+
+
+tracking_func()

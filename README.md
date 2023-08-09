@@ -13,7 +13,7 @@ commit来存储当然不现实。
 ## 使用方法
 
 ```python
-from FineCache.cachelib import PickleCache
+from FineCache import PickleCache, HistoryCache
 
 pc = PickleCache()
 
@@ -29,6 +29,6 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
     return a3, a4, kr1, kr2
 
 
-print(func(*(3,), **{'a2': 4, 'k2': 'v3'}))
+func(3, a2=4, k2='v3')
 ```
 
