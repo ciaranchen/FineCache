@@ -18,19 +18,23 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
 
 class TestPickleCache(unittest.TestCase):
     def setUp(self) -> None:
-        # Clear folders...
-        rmtree('.p_cache')
         self.pc = PickleCache('.p_cache')
 
+    def tearDown(self):
+        super().tearDown()
+        # Clear folders...
+        if os.path.exists('.p_cache'):
+            rmtree('.p_cache')
+
     def test_wrapped(self):
-        wrapped = self.pc.cache(func)
+        wrapped = self.pc.cache()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
     def test_pickle_cache(self):
         args = (3,)
         kwargs = {'a2': 4, 'k1': "v3"}
-        wrapped = self.pc.cache(func)
+        wrapped = self.pc.cache()(func)
         self.assertEqual(func(*args, **kwargs), wrapped(*args, **kwargs))
         self.assertEqual(func(*args, **kwargs), wrapped(*args, **kwargs))
 
@@ -43,7 +47,7 @@ class TestPickleCache(unittest.TestCase):
         kwargs = {'k1': 4, 'k2': lambda x: x + 3}
         _test_unpicklable(*args, **kwargs)
 
-        wrapped = self.pc.cache(_test_unpicklable)
+        wrapped = self.pc.cache()(_test_unpicklable)
         wrapped(*args, **kwargs)
 
         filepaths = [file for file in os.listdir('.p_cache') if file.startswith(_test_unpicklable.__name__ + '@')]
@@ -66,29 +70,33 @@ class TestPickleCache(unittest.TestCase):
         args = (3, lambda x: x)
         res0 = _test_lambda(*args)
         self.assertEqual(res0, 3)
-        wrapped = self.pc.cache(_test_lambda)
+        wrapped = self.pc.cache()(_test_lambda)
         res1 = wrapped(*args)
         self.assertEqual(res1, 3)
 
         args2 = (3, lambda x: x + 1)
-        # 此处会加载同样的文件，但是不会以func1的值重新调用，而是直接使用上一个结果。
+        # 此处不会产生相同结果
         res2 = wrapped(*args2)
-        self.assertEqual(res2, 3)
+        self.assertEqual(res2, 4)
 
-        args3 = (4, lambda x: x)
-        # 这里完全实现新的函数，所以会直接以args3为参数重新计算。
-        res3 = wrapped(*args3)
-        self.assertEqual(res3, 4)
 
     def test_not_picklable_result(self):
         def _test_unpicklable_result():
             return lambda x: 0
 
-        wrapped = self.pc.cache(_test_unpicklable_result)
+        wrapped = self.pc.cache()(_test_unpicklable_result)
         try:
             wrapped()
         except pickle.PickleError as e:
             pass
+
+    def test_self_defined_hash(self):
+        def test_func(a1, a2):
+            return a1, a2
+
+        wrapped = self.pc.cache(args_hash=[lambda a1: 'x', lambda a2: 'y'])(test_func)
+        wrapped('a1', 'a2')
+        self.assertTrue(os.path.exists(os.path.join('.p_cache', "test_func@['x';'y']@.pk")))
 
 
 class TestHistoryCache(unittest.TestCase):

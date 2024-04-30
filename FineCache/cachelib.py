@@ -3,10 +3,10 @@ import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
-from typing import Tuple, Callable, Dict, Any
+from typing import Tuple, Callable, Dict, Any, List
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from .CachedCall import CachedCall
+from .CachedCall import CachedCall, FilenameConfig, DefaultOptions
 import os
 import json
 
@@ -17,92 +17,65 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 logger = logging.getLogger(__name__)
 
 
-@dataclass
 class BaseCache:
     """
     缓存基础类。
     """
-    args_hash: Tuple[Callable] = None
-    kwargs_hash: Dict[str, Callable] = None
+    def __init__(self, base_path=None):
+        super().__init__()
+        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
+        os.makedirs(self.base_path, exist_ok=True)
 
-    def cache(self, func: Callable) -> Callable:
-        @wraps(func)
-        def _get_result(*args, **kwargs):
-            call = CachedCall(func, args, kwargs, args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
-            if self.exists(call):
-                return self.get(call)
-            else:
-                self.set(call)
-                return call.result
+    def cache(self, args_hash: List[Callable[[Any], str]] = None,
+              kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]] = None,
+              config: FilenameConfig = None):
+        def _cache(func: Callable) -> Callable:
+            @wraps(func)
+            def _get_result(*args, **kwargs):
+                call = CachedCall(func, args, kwargs, args_hash=args_hash, kwargs_hash=kwargs_hash, config=config)
+                if self.exists(call):
+                    return self.get(call)
+                else:
+                    self.set(call)
+                    return call.result
 
-        return _get_result
+            return _get_result
 
-    def exists(self, call: CachedCall):
-        pass
+        return _cache
 
-    def get(self, call: CachedCall):
-        pass
-
-    def set(self, call):
-        pass
-
-
-@dataclass
-class FilenameConfig:
-    join_args: str = ';'
-    join_dict: str = ';'
-    join_key_value: str = '-'
-    template_string: str = "{func_name}@[{args}]@{kwargs}"
-    config_path: str = None
-
-    def set_path(self, base_path=None, cfg_path=None):
-        cfg_path = cfg_path if cfg_path else '.cache_config.json'
-        # Load setting
-        if cfg_path and os.path.exists(cfg_path):
-            self.config_path = cfg_path
-        elif cfg_path and base_path and os.path.exists(os.path.join(base_path, cfg_path)):
-            self.config_path = os.path.join(base_path, cfg_path)
-        if self.config_path:
-            with open(self.config_path) as config_fp:
-                cfg = json.load(config_fp)
-            self.load(cfg)
-
-    def load(self, cfg: Dict[str, str]):
-        if 'join_args' in cfg:
-            self.join_args = cfg['join_args']
-        if 'join_dict' in cfg:
-            self.join_dict = cfg['join_dict']
-        if 'join_key_value' in cfg:
-            self.join_key_value = cfg['join_key_value']
-        if 'template_string' in cfg:
-            self.template_string = cfg['template_string']
-
-    def get_id(self, call: CachedCall):
+    def exists(self, call: CachedCall) -> bool:
         """
-        获取缓存的文件名
+        检查缓存文件是否存在
         :param call:
         :return:
         """
-        arg_list = [call.get_args_hash(i) if PickleCache.is_picklable(a) else 'None' for i, a in enumerate(call.args)]
-        kwarg_list = {k: call.get_kwargs_hash(k) if PickleCache.is_picklable(v) else 'None' for k, v in
-                      call.kwargs.items()}
-        args_string = self.join_args.join(arg_list)
-        kwargs_string = self.join_dict.join([k + self.join_key_value + v for k, v in kwarg_list.items()])
-        return self.template_string.format(func_name=call.func.__name__, args=args_string, kwargs=kwargs_string)
+        pass
+
+    def get(self, call: CachedCall):
+        """
+        从缓存文件获取结果
+        :param call:
+        :return:
+        """
+        pass
+
+    def set(self, call) -> None:
+        """
+        将运行结果缓存到缓存文件中
+        :param call:
+        :return:
+        """
+        pass
 
 
 class PickleCache(BaseCache):
-    def __init__(self, base_path=None, cfg_path=None, args_hash=None, kwargs_hash=None):
+    def __init__(self, base_path=None, cfg_path=None):
         """
 
         :param base_path: 保存的文件夹，默认为当前文件夹。
         :param cfg_path: 配置文件的路径，主要用于指定保存文件的路径格式。
         """
-        super().__init__(args_hash, kwargs_hash)
-        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
-        os.makedirs(self.base_path, exist_ok=True)
-        self.config = FilenameConfig()
-        self.config.set_path(base_path, cfg_path)
+        super().__init__(base_path)
 
     @staticmethod
     def is_picklable(obj: Any) -> bool:
@@ -115,22 +88,23 @@ class PickleCache(BaseCache):
             pickle.dumps(obj)
             return True
         except:
+            logger.info(f'parameters: {obj} could not be pickle')
             return False
 
     def exists(self, call: CachedCall):
-        filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
+        filename = os.path.join(self.base_path, call.filename + '.pk')
         return os.path.exists(filename) and os.path.isfile(filename)
 
     def get(self, call: CachedCall) -> Any:
-        filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
+        filename = os.path.join(self.base_path, call.filename + '.pk')
         with open(filename, 'rb') as fp:
             data = pickle.load(fp)
         assert call.func.__qualname__ == data['func']
         logger.debug(data)
 
-        n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'],
-                            args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
-        return n_call.result
+        # 可以尝试获取更多的数据内容，但是可以直接返回 'result'
+        # n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'])
+        return data['result']
 
     @staticmethod
     def _construct_content(call):
@@ -141,8 +115,10 @@ class PickleCache(BaseCache):
         """
         args = [a if PickleCache.is_picklable(a) else None for a in call.args]
         kwargs = {k: v if PickleCache.is_picklable(v) else None for k, v in call.kwargs.items()}
-        result = call.run()
+        result = call.result
         if not PickleCache.is_picklable(result):
+            logger.error(f"{result} isn't picklable...")
+            logger.error(f"{call.func.__qualname__}, args: {args}, kwargs: {kwargs}")
             raise pickle.PickleError("not a picklable result...")
 
         return {
@@ -153,7 +129,7 @@ class PickleCache(BaseCache):
         }
 
     def set(self, call: CachedCall):
-        filename = os.path.join(self.base_path, self.config.get_id(call) + '.pk')
+        filename = os.path.join(self.base_path, call.filename + '.pk')
         content = self._construct_content(call)
         logger.debug(content)
         with open(filename, 'wb') as fp:
