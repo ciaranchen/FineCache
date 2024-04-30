@@ -144,9 +144,9 @@ class HistoryCache(BaseCache):
         super().__init__(base_path)
         self.cache_result = cache_result
         self.tracking_files = tracking_files if tracking_files else []
-        self.code_filename = 'code.py'
-        self.result_filename = 'result.pk'
-        self.tracking_filename = 'tracking.zip'
+        self.code_filename = 'code.py'  # 当前版本代码文件
+        self.result_filename = 'result.pk'  # 当前版本结果与参数等的保存文件 （对于不支持pickle的参数，将会跳过存储。对于不支持pickle 的函数运行结果，将会报错。）
+        self.tracking_filename = 'tracking.zip'  # 所有tracking_files的打包
 
     def exists(self, call: CachedCall):
         path = os.path.join(self.base_path, call.filename)
