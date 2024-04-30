@@ -79,7 +79,6 @@ class TestPickleCache(unittest.TestCase):
         res2 = wrapped(*args2)
         self.assertEqual(res2, 4)
 
-
     def test_not_picklable_result(self):
         def _test_unpicklable_result():
             return lambda x: 0
@@ -100,9 +99,13 @@ class TestPickleCache(unittest.TestCase):
 
 
 class TestHistoryCache(unittest.TestCase):
-    def setUp(self) -> None:
+    def tearDown(self):
+        super().tearDown()
         # Clear folders...
-        rmtree('.h_cache')
+        if os.path.exists('.h_cache'):
+            rmtree('.h_cache')
+
+    def setUp(self) -> None:
         self.hc = HistoryCache('.h_cache')
 
         def _test_func_history(a1, a2):
@@ -114,7 +117,7 @@ class TestHistoryCache(unittest.TestCase):
             """
             return a1
 
-        self.wrapped1 = self.hc.cache(_test_func_history)
+        self.wrapped1 = self.hc.cache()(_test_func_history)
 
         def _test_func_history(a1, a2):
             """
@@ -125,10 +128,10 @@ class TestHistoryCache(unittest.TestCase):
             """
             return a1 + 1
 
-        self.wrapped2 = self.hc.cache(_test_func_history)
+        self.wrapped2 = self.hc.cache()(_test_func_history)
 
     def test_wrapped(self):
-        wrapped = self.hc.cache(func)
+        wrapped = self.hc.cache()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 

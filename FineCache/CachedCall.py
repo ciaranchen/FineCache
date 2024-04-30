@@ -29,10 +29,13 @@ class HashFunc:
 
 @dataclass
 class FilenameConfig:
-    join_list: str = ';'
-    join_dict: str = ';'
-    join_key_value: str = '-'
-    join_func: str = "{func_name}@[{args}]@{kwargs}"
+    """
+    缓存文件的文件名命名规范
+    """
+    join_list: str = ','
+    join_dict: str = ','
+    join_key_value: str = '='
+    join_func: str = "{func_name}({args};{kwargs})"
     config_path: str = None
 
 

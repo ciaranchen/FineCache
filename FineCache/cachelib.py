@@ -21,7 +21,11 @@ class BaseCache:
     """
     缓存基础类。
     """
+
     def __init__(self, base_path=None):
+        """
+        :param base_path: 保存的文件夹，默认为当前文件夹。
+        """
         super().__init__()
         self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
         os.makedirs(self.base_path, exist_ok=True)
@@ -36,8 +40,9 @@ class BaseCache:
                 if self.exists(call):
                     return self.get(call)
                 else:
+                    result = call.result
                     self.set(call)
-                    return call.result
+                    return result
 
             return _get_result
 
@@ -69,14 +74,6 @@ class BaseCache:
 
 
 class PickleCache(BaseCache):
-    def __init__(self, base_path=None, cfg_path=None):
-        """
-
-        :param base_path: 保存的文件夹，默认为当前文件夹。
-        :param cfg_path: 配置文件的路径，主要用于指定保存文件的路径格式。
-        """
-        super().__init__(base_path)
-
     @staticmethod
     def is_picklable(obj: Any) -> bool:
         """
@@ -126,6 +123,8 @@ class PickleCache(BaseCache):
             'args': args,
             'kwargs': kwargs,
             'result': result,
+            'module': call.func.__module__,
+            'runtime': str(datetime.now())
         }
 
     def set(self, call: CachedCall):
@@ -136,106 +135,96 @@ class PickleCache(BaseCache):
             pickle.dump(content, fp)
 
 
-@dataclass
-class VersionConfig:
-    version: int = 1
-
-    def increment(self):
-        self.version += 1
-
-    def save_to_file(self, filename):
-        with open(filename, 'wb') as f:
-            pickle.dump(self.version, f)
-
-    @classmethod
-    def load_from_file(cls, filename):
-        with open(filename, 'rb') as f:
-            version = pickle.load(f)
-        new_instance = cls(version)
-        return new_instance
-
-
 class HistoryCache(BaseCache):
     """
     这个类只保存函数代码和运行结果，内容可以直接查看。
     """
 
-    def __init__(self, base_path=None, tracking_files=None, cfg_path=None, args_hash=None, kwargs_hash=None):
-        super().__init__(args_hash, kwargs_hash)
-        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
-        os.makedirs(self.base_path, exist_ok=True)
-        self.config = FilenameConfig()
-        self.config.set_path(base_path, cfg_path)
+    def __init__(self, base_path=None, tracking_files: List[str] = None, cache_result: bool = True):
+        super().__init__(base_path)
+        self.cache_result = cache_result
         self.tracking_files = tracking_files if tracking_files else []
-        self.filename_template = 'v{ver}.{suffix}'
-
-    def cache(self, func: Callable) -> Callable:
-        @wraps(func)
-        def _get_result(*args, **kwargs):
-            call = CachedCall(func, args, kwargs, args_hash=self.args_hash, kwargs_hash=self.kwargs_hash)
-            self.set(call)
-            return call.result
-
-        return _get_result
+        self.code_filename = 'code.py'
+        self.result_filename = 'result.pk'
+        self.tracking_filename = 'tracking.zip'
 
     def exists(self, call: CachedCall):
-        path = os.path.join(self.base_path, self.config.get_id(call))
-        return os.path.exists(path) and os.path.isdir(path)
+        path = os.path.join(self.base_path, call.filename)
+        if not (os.path.exists(path) and os.path.isdir(path)):
+            return False
+        # get the latest version code
+        version_path = os.path.join(path, '.version.txt')
+        if not os.path.exists(version_path):
+            return False
+
+        with open(version_path, 'r') as f:
+            latest_version = int(f.read())
+        latest_version_folder = os.path.join(path, str(latest_version))
+        code_filename = os.path.join(latest_version_folder, self.code_filename)
+        with open(code_filename, encoding='utf-8') as fp:
+            lines = fp.readlines()
+            old_code = ''.join(lines[1:])
+        return inspect.getsource(call.func) == old_code
 
     def set(self, call):
-        path = os.path.join(self.base_path, self.config.get_id(call))
+        path = os.path.join(self.base_path, call.filename)
         os.makedirs(path, exist_ok=True)
         version_path = os.path.join(path, '.version.txt')
+        if os.path.exists(version_path):
+            with open(version_path, 'r') as f:
+                latest_version = int(f.read())
+        else:
+            latest_version = 0
 
-        ver_conf = VersionConfig() if not os.path.exists(version_path) else VersionConfig.load_from_file(version_path)
+        now_version = latest_version + 1
+        now_version_folder = os.path.join(path, str(now_version))
+        os.makedirs(now_version_folder, exist_ok=True)
 
-        old_filename = self.filename_template.format(ver=ver_conf.version, suffix='py')
-        old_path = os.path.join(path, old_filename)
-        # 若存在旧文件，则存在新文件，否则直接存在旧文件
-        if os.path.exists(old_path):
-            with open(old_path, encoding='utf-8') as fp:
-                lines = fp.readlines()
-                old_code = ''.join(lines[1:])
-            # 若现有代码与历史代码不一致
-            if inspect.getsource(call.func) != old_code:
-                # 保存结果到新的版本
-                ver_conf.increment()
-            else:
-                # 否则无需保存结果，只照常运行即可
-                call.run()
-                return
-        ver_conf.save_to_file(version_path)
-
-        # Save function code
-        func_code_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='py'))
+        # 保存当前函数代码
+        func_code_filename = os.path.join(now_version_folder, self.code_filename)
         src_filename = inspect.getsourcefile(call.func)
         lines, line_num = inspect.getsourcelines(call.func)
         with open(func_code_filename, 'w', encoding='utf-8') as fp:
-            fp.write(f'# {src_filename} L{line_num} V{ver_conf.version}\n')
+            fp.write(f'# {src_filename} L{line_num} V{now_version}\n')
             fp.writelines(lines)
 
-        pickle_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='pk'))
+        # 保存当前函数运行结果
+        pickle_filename = os.path.join(now_version_folder, self.result_filename)
         content = PickleCache._construct_content(call)
         content.update({
-            'module': call.func.__module__,
-            'version': ver_conf.version,
-            'runtime': str(datetime.now()),
+            'version': now_version
         })
         logger.debug(content)
         with open(pickle_filename, 'wb') as fp:
             pickle.dump(content, fp)
 
         if len(self.tracking_files) != 0:
-            zip_filename = os.path.join(path, self.filename_template.format(ver=ver_conf.version, suffix='zip'))
+            zip_filename = os.path.join(now_version_folder, self.tracking_filename)
             with ZipFile(zip_filename, 'w') as zip_file:
                 for f in self.tracking_files:
                     zip_file.write(f, compress_type=ZIP_DEFLATED)
 
-    def explore(self, func, args=(), kwargs=None, key=lambda x: x):
-        if kwargs is None:
-            kwargs = {}
-        call = CachedCall(func, args, kwargs)
-        path = os.path.join(self.base_path, self.config.get_id(call))
-        if not os.path.exists(path):
-            raise Exception(f"Could not explore: {func.__qualname__}(args={args}, kwargs={kwargs}), not exists {path}")
-        return [key(os.path.join(path, f[:-5])) for f in os.listdir(path) if f.endswith('json')]
+        # 重新写入 Latest version 文件
+        latest_version += 1
+        with open(version_path, 'w') as f:
+            f.write(str(latest_version))
+
+    def get(self, call: CachedCall) -> Any:
+        if self.cache_result:
+            path = os.path.join(self.base_path, call.filename)
+            version_path = os.path.join(path, '.version.txt')
+            with open(version_path, 'r') as f:
+                latest_version = int(f.read())
+            latest_version_folder = os.path.join(path, str(latest_version))
+            filename = os.path.join(latest_version_folder, self.result_filename)
+            with open(filename, 'rb') as fp:
+                data = pickle.load(fp)
+            assert call.func.__qualname__ == data['func']
+            logger.debug(data)
+
+            # 可以尝试获取更多的数据内容，但是可以直接返回 'result'
+            # n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'])
+            return data['result']
+        else:
+            # 不读取Cache结果，而是直接进行计算
+            return call.result
