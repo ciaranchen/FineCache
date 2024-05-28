@@ -3,7 +3,8 @@ import pickle
 import unittest
 from shutil import rmtree
 
-from FineCache import FineCache, HistoryCache
+from FineCache import FineCache
+from FineCache.cachelib import IncrementDir
 
 
 def func(a1: int, a2: int, k1="v1", k2="v2"):
@@ -106,45 +107,25 @@ class TestHistoryCache(unittest.TestCase):
             rmtree('.h_cache')
 
     def setUp(self) -> None:
-        self.hc = HistoryCache('.h_cache')
-
-        def _test_func_history(a1, a2):
-            """
-            test function version 1
-            :param a1:
-            :param a2:
-            :return:
-            """
-            return a1
-
-        self.wrapped1 = self.hc.cache()(_test_func_history)
-
-        def _test_func_history(a1, a2):
-            """
-            test function version 2
-            :param a1:
-            :param a2:
-            :return:
-            """
-            return a1 + 1
-
-        self.wrapped2 = self.hc.cache()(_test_func_history)
+        self.inc = IncrementDir('.h_cache', dir_prefix='test')
+        self.hc = FineCache('.h_cache', increment_dir=self.inc)
 
     def test_wrapped(self):
-        wrapped = self.hc.cache()(func)
+        wrapped = self.hc.record()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
-    def test_history_cache(self):
-        args = (1, 2)
-        self.assertEqual(self.wrapped1(*args) + 1, self.wrapped2(*args))
+    def test_output_duplicate(self):
+        @self.hc.record()
+        def output():
+            print('123456789')
 
-        paths = [d for d in os.listdir('.h_cache') if d.startswith('_test_func_history@')]
-        self.assertEqual(len(paths), 1)
-
-    def test_unpicklable(self):
-        # TODO: finish it.
-        pass
+        output()
+        _, latest_dir = self.inc.latest_number
+        filename = os.path.join('.h_cache', latest_dir, 'console.log')
+        with open(filename) as fp:
+            content = fp.read()
+        self.assertTrue('123456789' in content)
 
 
 if __name__ == '__main__':

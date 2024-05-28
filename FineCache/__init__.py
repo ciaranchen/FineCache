@@ -1,2 +1,2 @@
-from .cachelib import FineCache, HistoryCache
+from .cachelib import FineCache, IncrementDir
 from .CachedCall import CacheFilenameConfig
