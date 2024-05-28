@@ -1,10 +1,8 @@
-import hashlib
-import json
-import os
+import pickle
 from dataclasses import dataclass
+from datetime import datetime
 from functools import cached_property
-from itertools import zip_longest
-from typing import Dict, Callable, Any, Tuple, List
+from typing import Dict, Callable, Any, Tuple
 
 import logging
 
@@ -24,57 +22,53 @@ class CachedCall:
         return self.func(*self.args, **self.kwargs)
 
 
-class HashFunc:
+class PickleAgent:
     @staticmethod
-    def hash(x, hash_cls=hashlib.md5):
+    def is_picklable(obj: Any) -> bool:
         """
-        普通hash算法
-        :param x:
-        :param hash_cls:
-        :return:
+        判断是否可以被pickle缓存
         """
-        obj = hash_cls()
-        obj.update(x.encode('utf-8'))
-        return obj.hexdigest()
+        try:
+            pickle.dumps(obj)
+            return True
+        except:
+            logger.warning(f'parameters: {obj} could not be pickle')
+            return False
 
+    @staticmethod
+    def get(call: CachedCall, filename: str) -> Any:
+        with open(filename, 'rb') as fp:
+            data = pickle.load(fp)
+        assert call.func.__qualname__ == data['func']
+        logger.debug(data)
 
-@dataclass
-class CacheFilenameConfig:
-    """
-    缓存文件的文件名命名规范
-    """
-    join_list: str = ','
-    join_dict: str = ','
-    join_key_value: str = '='
-    join_func: str = "{func_name}({args};{kwargs})"
-    config_path: str = None
-    suffix: str = '.pk'
+        # 可以尝试获取更多的数据内容，但是可以直接返回 'result'
+        # n_call = CachedCall(data['func'], data['args'], data['kwargs'], result=data['result'])
+        return data['result']
 
-    def get_filename(self, call: CachedCall, args_hash, kwargs_hash):
-        if args_hash is None:
-            args_hash = [lambda x: HashFunc.hash(repr(x))] * len(call.args)
-        if kwargs_hash is None:
-            kwargs_hash = [lambda x, y: (x, HashFunc.hash(repr(y)))] * len(call.kwargs)
+    @staticmethod
+    def _construct_content(call, result):
+        """
+        构造函数调用缓存的内容
+        """
+        args = [a if PickleAgent.is_picklable(a) else None for a in call.args]
+        kwargs = {k: v if PickleAgent.is_picklable(v) else None for k, v in call.kwargs.items()}
+        if not PickleAgent.is_picklable(result):
+            logger.error(f"{result} isn't picklable...")
+            logger.error(f"{call.func.__qualname__}, args: {args}, kwargs: {kwargs}")
+            raise pickle.PickleError(f"Object {result} is not picklable...")
 
-        def args_str(call) -> [str]:
-            res = []
-            for args, hash_func in zip_longest(call.args, args_hash):
-                if hash_func is None:
-                    res.append(repr(args))
-                else:
-                    res.append(repr(hash_func(args)))
-            return res
+        return {
+            'func': call.func.__qualname__,
+            'args': args,
+            'kwargs': kwargs,
+            'result': result,
+            'module': call.func.__module__,
+            'runtime': str(datetime.now())
+        }
 
-        def kwargs_str(call) -> [(str, str)]:
-            res = []
-            for (key, value), hash_func in zip_longest(call.kwargs.items(), kwargs_hash):
-                if hash_func is None:
-                    res.append((key, repr(value)))
-                else:
-                    _key, _value = hash_func(key, value)
-                    res.append((_key, repr(_value)))
-            return res
-
-        args_string = self.join_list.join(args_str(call))
-        kwargs_string = self.join_dict.join([k + self.join_key_value + v for k, v in kwargs_str(call)])
-        return self.join_func.format(func_name=call.func.__name__, args=args_string, kwargs=kwargs_string) + self.suffix
+    def set(self, call: CachedCall, result, filename: str):
+        content = self._construct_content(call, result)
+        logger.debug(content)
+        with open(filename, 'wb') as fp:
+            pickle.dump(content, fp)

@@ -3,8 +3,7 @@ import pickle
 import unittest
 from shutil import rmtree
 
-from FineCache import FineCache
-from FineCache.cachelib import IncrementDir
+from FineCache import FineCache, IncrementDir
 
 
 def func(a1: int, a2: int, k1="v1", k2="v2"):

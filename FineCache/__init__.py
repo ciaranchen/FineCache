@@ -1,2 +1,3 @@
-from .cachelib import FineCache, IncrementDir
-from .CachedCall import CacheFilenameConfig
+from .cachelib import FineCache
+from .CachedCall import CachedCall, PickleAgent
+from .utils import CacheFilenameConfig, IncrementDir
