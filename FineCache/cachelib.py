@@ -6,7 +6,7 @@ from functools import wraps
 from typing import Tuple, Callable, Dict, Any, List
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from .CachedCall import CachedCall, FilenameConfig, DefaultOptions
+from .CachedCall import CachedCall, CacheFilenameConfig
 import os
 import json
 
@@ -17,83 +17,21 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 logger = logging.getLogger(__name__)
 
 
-class BaseCache:
-    """
-    缓存基础类。
-    """
-
-    def __init__(self, base_path=None):
-        """
-        :param base_path: 保存的文件夹，默认为当前文件夹。
-        """
-        super().__init__()
-        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
-        os.makedirs(self.base_path, exist_ok=True)
-
-    def cache(self, args_hash: List[Callable[[Any], str]] = None,
-              kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]] = None,
-              config: FilenameConfig = None):
-        def _cache(func: Callable) -> Callable:
-            @wraps(func)
-            def _get_result(*args, **kwargs):
-                call = CachedCall(func, args, kwargs, args_hash=args_hash, kwargs_hash=kwargs_hash, config=config)
-                if self.exists(call):
-                    return self.get(call)
-                else:
-                    result = call.result
-                    self.set(call)
-                    return result
-
-            return _get_result
-
-        return _cache
-
-    def exists(self, call: CachedCall) -> bool:
-        """
-        检查缓存文件是否存在
-        :param call:
-        :return:
-        """
-        pass
-
-    def get(self, call: CachedCall):
-        """
-        从缓存文件获取结果
-        :param call:
-        :return:
-        """
-        pass
-
-    def set(self, call) -> None:
-        """
-        将运行结果缓存到缓存文件中
-        :param call:
-        :return:
-        """
-        pass
-
-
-class PickleCache(BaseCache):
+class PickleAgent:
     @staticmethod
     def is_picklable(obj: Any) -> bool:
         """
         判断是否可以被pickle缓存
-        :param obj:
-        :return:
         """
         try:
             pickle.dumps(obj)
             return True
         except:
-            logger.info(f'parameters: {obj} could not be pickle')
+            logger.warning(f'parameters: {obj} could not be pickle')
             return False
 
-    def exists(self, call: CachedCall):
-        filename = os.path.join(self.base_path, call.filename + '.pk')
-        return os.path.exists(filename) and os.path.isfile(filename)
-
-    def get(self, call: CachedCall) -> Any:
-        filename = os.path.join(self.base_path, call.filename + '.pk')
+    @staticmethod
+    def get(call: CachedCall, filename: str) -> Any:
         with open(filename, 'rb') as fp:
             data = pickle.load(fp)
         assert call.func.__qualname__ == data['func']
@@ -104,16 +42,13 @@ class PickleCache(BaseCache):
         return data['result']
 
     @staticmethod
-    def _construct_content(call):
+    def _construct_content(call, result):
         """
         构造函数调用缓存的内容
-        :param call:
-        :return:
         """
-        args = [a if PickleCache.is_picklable(a) else None for a in call.args]
-        kwargs = {k: v if PickleCache.is_picklable(v) else None for k, v in call.kwargs.items()}
-        result = call.result
-        if not PickleCache.is_picklable(result):
+        args = [a if PickleAgent.is_picklable(a) else None for a in call.args]
+        kwargs = {k: v if PickleAgent.is_picklable(v) else None for k, v in call.kwargs.items()}
+        if not PickleAgent.is_picklable(result):
             logger.error(f"{result} isn't picklable...")
             logger.error(f"{call.func.__qualname__}, args: {args}, kwargs: {kwargs}")
             raise pickle.PickleError("not a picklable result...")
@@ -127,15 +62,55 @@ class PickleCache(BaseCache):
             'runtime': str(datetime.now())
         }
 
-    def set(self, call: CachedCall):
-        filename = os.path.join(self.base_path, call.filename + '.pk')
-        content = self._construct_content(call)
+    def set(self, call: CachedCall, result, filename: str):
+        content = self._construct_content(call, result)
         logger.debug(content)
         with open(filename, 'wb') as fp:
             pickle.dump(content, fp)
 
 
-class HistoryCache(BaseCache):
+class FineCache:
+    def __init__(self, base_path=None, agent_class=PickleAgent):
+        """
+        :param base_path: 保存的文件夹，默认为当前文件夹。
+        """
+        super().__init__()
+        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
+        os.makedirs(self.base_path, exist_ok=True)
+        self.agent = PickleAgent()
+
+    def cache(self, args_hash: List[Callable[[Any], str]] = None,
+              kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]] = None,
+              config: CacheFilenameConfig = CacheFilenameConfig()):
+        """
+        缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
+        :param args_hash:
+        :param kwargs_hash:
+        :param config:
+        :return:
+        """
+
+        def _cache(func: Callable) -> Callable:
+            @wraps(func)
+            def _get_result(*args, **kwargs):
+                call = CachedCall(func, args, kwargs)
+                filename = config.get_filename(call, args_hash=args_hash, kwargs_hash=kwargs_hash)
+                cache_filename = os.path.join(self.base_path, filename)
+                if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
+                    # 从缓存文件获取结果
+                    return self.agent.get(call, cache_filename)
+                else:
+                    # 将运行结果缓存到缓存文件中
+                    result = call.result
+                    self.agent.set(call, result, cache_filename)
+                    return result
+
+            return _get_result
+
+        return _cache
+
+
+class HistoryCache(FineCache):
     """
     这个类只保存函数代码和运行结果，内容可以直接查看。
     """
@@ -190,7 +165,7 @@ class HistoryCache(BaseCache):
 
         # 保存当前函数运行结果
         pickle_filename = os.path.join(now_version_folder, self.result_filename)
-        content = PickleCache._construct_content(call)
+        content = FineCache._construct_content(call)
         content.update({
             'version': now_version
         })

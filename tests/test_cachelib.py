@@ -3,7 +3,7 @@ import pickle
 import unittest
 from shutil import rmtree
 
-from FineCache import PickleCache, HistoryCache
+from FineCache import FineCache, HistoryCache
 
 
 def func(a1: int, a2: int, k1="v1", k2="v2"):
@@ -16,9 +16,9 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
     return a3, a4, kr1, kr2
 
 
-class TestPickleCache(unittest.TestCase):
+class TestFineCache(unittest.TestCase):
     def setUp(self) -> None:
-        self.pc = PickleCache('.p_cache')
+        self.pc = FineCache('.p_cache')
 
     def tearDown(self):
         super().tearDown()
@@ -50,7 +50,7 @@ class TestPickleCache(unittest.TestCase):
         wrapped = self.pc.cache()(_test_unpicklable)
         wrapped(*args, **kwargs)
 
-        filepaths = [file for file in os.listdir('.p_cache') if file.startswith(_test_unpicklable.__name__ + '@')]
+        filepaths = [file for file in os.listdir('.p_cache') if file.startswith(_test_unpicklable.__name__)]
         self.assertEqual(len(filepaths), 1)
         with open(os.path.join('.p_cache', filepaths[0]), 'rb') as fp:
             data = pickle.load(fp)
@@ -95,7 +95,7 @@ class TestPickleCache(unittest.TestCase):
 
         wrapped = self.pc.cache(args_hash=[lambda a1: 'x', lambda a2: 'y'])(test_func)
         wrapped('a1', 'a2')
-        self.assertTrue(os.path.exists(os.path.join('.p_cache', "test_func@['x';'y']@.pk")))
+        self.assertTrue(os.path.exists(os.path.join('.p_cache', "test_func('x','y';).pk")))
 
 
 class TestHistoryCache(unittest.TestCase):
