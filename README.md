@@ -1,14 +1,9 @@
 # FineCache
 
-之前就已经有不少项目实现过Python的缓存，但是这些项目的目的都是为了优化函数的运行过程。所以在这些项目中，往往将函数的结果保存在内存中或者数据库中。
+科研项目缓存和记录方案。主要提供两个装饰器：
 
-在进行研究的过程中，尝尝出现需要调整参数或者方法的情况，这时就需要保存函数的原始代码，而且有时候甚至需要保存函数运行的参数。
-每一次运行的过程改动可能都不大，每次都用一个git commit来存储当然不现实。
-
-因此为了帮助调参时暂存结果，编写了这个项目。主要的使用类别为两个装饰器：
-
-- PickleCache: 缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
-- HistoryCache: 缓存函数的运行结果、参数和函数及指定文件的代码。用于简化和记录函数原始代码的改动。
+- `FineCache.cache` : 缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
+- `FineCache.record`: 记录实验进行时的代码改动、配置文件及运行信息。
 
 ## 安装
 
@@ -16,15 +11,15 @@
 pip install FineCache
 ```
 
-## 使用方法 - PickleCache
+## 示例 (FineCache.cache)
 
 ```python
-from FineCache import PickleCache
+from FineCache import FineCache
 
-pc = PickleCache()
+fc = FineCache()
 
 
-@pc.cache()
+@fc.cache()
 def func(a1: int, a2: int, k1="v1", k2="v2"):
     """normal run function"""
     a3 = a1 + 1
@@ -38,54 +33,65 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
 func(3, a2=4, k2='v3')
 ```
 
-PickleCache初始化参数为缓存的存储路径。默认是储在当前运行的目录。
+### 详细说明
 
-其中， `pc.cache`具有可选参数如下：
+#### FineCache(base_path: str, agent_class: PickleAgent, increment_dir: IncrementDir)
 
-- args_hash和kwargs_hash 参数接受函数的列表。来定义其文件名，进而确定由哪些变量决定参数是否发生变化，是否需要使用不同的cache。默认的函数是对 原参数的repr计算md5值。
-- config 可进一步定义文件名的通用格式。
+- base_path。基础缓存目录，默认为当前目录。cache的缓存会生成文件。record将会在目录中生成多个文件夹。
+- agent_class。为cache所使用的缓存格式，目前仅支持Pickle。（对于不支持pickle的函数参数，将会跳过存储；对于不支持pickle
+  的函数运行结果，将会报错。）
+- increment_dir。为record使用的自增目录类。参见 `IncrementDir` 说明。
 
-> 对于不支持pickle的参数，将会跳过存储。
-> 
-> 对于不支持pickle 的函数运行结果，将会报错。
+#### FineCache.cache(self, args_hash, kwargs_hash, config = CacheFilenameConfig())
 
-## 使用方法 - HistoryCache
+在科研项目（尤其是涉及机器学习的项目）中，通常都需要对通用的数据集进行预处理；进行预处理的结果不应该永久保存，而且又应该避免重复调用繁琐的预处理流程。
 
-```python
-from FineCache import HistoryCache
+这个装饰器能缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
 
-hc = HistoryCache('.history')
-
-
-@hc.cache()
-def tracking_func():
-    """
-    tracking function version 1
-    :return:
-    """
-    # change this line and re-run this function
-    return 0
-
-
-tracking_func()
-```
-
-HistoryCache 初始化参数如下：
-
-- base_path: 历史记录缓存的额存储路径。默认为当前文件夹。
-- tracking_files: 不同版本需要额外保存的文件。
-- ignore_cache: 设置False即使在命中的情况下，也运行函数。
-
-可以通过直接改动 HistoryCache 中的变量值来自定义Cache中文件的命名。下面为这几个变量的意义及默认值，
+- `args_hash: List[Callable[[Any], str]]`  与 `kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]]`。
+  通过这两个参数对函数的参数进行数字摘要，从而确定文件名。默认方法是对参数计算md5值，应该足以应对大多数的情况。
+  如果传入的参数为None，则视为使用参数的__repr__可以部分减少写lambda的麻烦。
+  需要注意的是，类的方法的首个参数是self，即类的对象。下面是一个使用`args_hash`的示例。
 
 ```python
-from FineCache import HistoryCache
+class DataLoader:
+    ...
 
-hc = HistoryCache()
-hc.code_filename = 'code.py'  # 当前版本代码文件
-hc.result_filename = 'result.pk'  # 当前版本结果与参数等的保存文件 （对于不支持pickle的参数，将会跳过存储。对于不支持pickle 的函数运行结果，将会报错。）
-hc.tracking_filename = 'tracking.zip'  # 所有tracking_files的打包
+    @FineCache().cache(args_hash=[lambda x: 'DataLoader'])
+    def load(self):
+        pass
+# 产生缓存文件 "load('DataLoader';).pk"
 ```
 
-`hc.cache` 的定义与 `pc.cache` 一致。
+- `config` 定义了缓存文件的文件名生成方式。实际上缓存文件名的生成方式是这样调用的。
 
+```python
+config.get_filename(call, args_hash, kwargs_hash)
+```
+
+#### FineCache.record(self, comment: str = "", tracking_files: List[str] = None, save_output: bool = True)
+
+在进行研究的过程中，尝尝出现需要调整参数或者方法的情况，这时就需要保存函数的原始代码。每一次运行的过程改动可能都不大，每次都进行git
+commit来存储当然不现实。
+
+这个装饰器能记录实验进行时的代码改动、配置文件及运行信息。参数说明如下。
+
+- comment: 本次实验的注释。将会影响在base_path下生成文件夹的文件名。
+- tracking_files: 需要保存的配置文件，或任何其它文件。可以使用正则表达式。
+- save_output: 是否记录当前装饰函数的stdout。这不会影响原有输出。
+
+装饰器将在被装饰的函数运行时，在base_path下生成一个文件夹。文件夹中将包含：
+
+- `information.json`: 必要的信息。包含 记录的时间、记录时HEAD的commit ID。
+- `console.log`: 记录的被装饰函数的输出。
+- `current_changes.patch`: 与HEAD的差距patch。
+- `其它tracking_fiels中记录的文件`。
+
+### 其它说明
+
+#### IncrementDir(base_path: str, dir_prefix: str = "")
+
+- base_path: 基础缓存目录。
+- dir_prefix: 生成文件夹名称的前缀。
+
+其生成的文件夹名称为 `{dir_prefix}{num}` 或 `{dir_prefix}{num}-{comment}`。

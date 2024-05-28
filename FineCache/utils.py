@@ -20,9 +20,6 @@ class HashFunc:
     def hash(x, hash_cls=hashlib.md5):
         """
         普通hash算法
-        :param x:
-        :param hash_cls:
-        :return:
         """
         obj = hash_cls()
         obj.update(x.encode('utf-8'))
