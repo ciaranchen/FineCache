@@ -35,12 +35,9 @@ func(3, a2=4, k2='v3')
 
 ### 详细说明
 
-#### FineCache(base_path: str, agent_class: PickleAgent, increment_dir: IncrementDir)
+#### FineCache(base_path: str, agent_class: PickleAgent)
 
 - base_path。基础缓存目录，默认为当前目录。cache的缓存会生成文件。record将会在目录中生成多个文件夹。
-- agent_class。为cache所使用的缓存格式，目前仅支持Pickle。（对于不支持pickle的函数参数，将会跳过存储；对于不支持pickle
-  的函数运行结果，将会报错。）
-- increment_dir。为record使用的自增目录类。参见 `IncrementDir` 说明。
 
 #### FineCache.cache(self, args_hash, kwargs_hash, config = CacheFilenameConfig())
 
@@ -69,29 +66,50 @@ class DataLoader:
 config.get_filename(call, args_hash, kwargs_hash)
 ```
 
-#### FineCache.record(self, comment: str = "", tracking_files: List[str] = None, save_output: bool = True)
+- `agent`。为cache所使用的缓存格式，目前仅支持PickleAgent。（对于不支持pickle的函数参数，将会跳过存储；对于不支持pickle
+  的函数运行结果，将会报错。）
+
+#### FineCache.record_context(self, increment_dir: IncrementDir = None, comment: str = "", tracking_files: List[str] = None, save_output: bool = True)
 
 在进行研究的过程中，尝尝出现需要调整参数或者方法的情况，这时就需要保存函数的原始代码。每一次运行的过程改动可能都不大，每次都进行git
 commit来存储当然不现实。
 
-这个装饰器能记录实验进行时的代码改动、配置文件及运行信息。参数说明如下。
+此上下文管理器能记录实验进行时的代码改动、配置文件及运行信息。参数说明如下。
 
-- comment: 本次实验的注释。将会影响在base_path下生成文件夹的文件名。
-- tracking_files: 需要保存的配置文件，或任何其它文件。可以使用正则表达式。
-- save_output: 是否记录当前装饰函数的stdout。这不会影响原有输出。
+- `increment_dir`。为record使用的自增目录类，默认为`IncrementDir(self.base_path)`。参见 `IncrementDir` 说明。
+- `comment`: 本次实验的注释。将会影响在base_path下生成文件夹的文件名。
+- `tracking_files`: 需要保存的配置文件，或任何其它文件。可以使用正则表达式。
+- `save_output`: 是否记录当前装饰函数的stdout。这不会影响原有输出。
 
-装饰器将在被装饰的函数运行时，在base_path下生成一个文件夹。文件夹中将包含：
+上下文管理器在进入和离开时，将在base_path下生成一个文件夹。文件夹中将包含：
 
-- `information.json`: 必要的信息。包含 记录的时间、记录时HEAD的commit ID。
+- `information.json`: 必要的信息。包含以下字段。
+    - `commit`: HEAD的commit ID。
+    - `project_root`: git项目的根目录。
+    - `patch_time`: 记录current changes的时间
+    - `tracking_records`: 额外记录的文件名列表（相对于项目根目录的路径）。
 - `console.log`: 记录的被装饰函数的输出。
 - `current_changes.patch`: 与HEAD的差距patch。
 - `其它tracking_fiels中记录的文件`。
+
+上下文管理器的使用例子如下。可以在`info`字典中添加自定义的内容，将会在离开上下文时被一同写入`information.json`。
+
+```python
+with fc.record_context as info:
+    pass  # do something.
+```
+
+> 注意：为了防止运行时间过长导致运行到上下文处时代码已经做了变更。我们将会在FineCache初始化时就记录代码的patch，只是在上下文运行时才写入文件。
+
+#### FineCache.record_context
+
+此装饰器与record的参数定义完全一致。只是提供不同的使用方式。在`information.json`中会额外写入调用的函数名称及运行结束的时间。
 
 ### 其它说明
 
 #### IncrementDir(base_path: str, dir_prefix: str = "")
 
-- base_path: 基础缓存目录。
-- dir_prefix: 生成文件夹名称的前缀。
+- `base_path`: 基础缓存目录。
+- `dir_prefix`: 生成文件夹名称的前缀。
 
 其生成的文件夹名称为 `{dir_prefix}{num}` 或 `{dir_prefix}{num}-{comment}`。

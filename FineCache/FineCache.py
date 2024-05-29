@@ -21,25 +21,43 @@ logger = logging.getLogger(__name__)
 
 
 class FineCache:
-    def __init__(self, base_path=None, agent_class=PickleAgent, increment_dir: IncrementDir = None):
+    def __init__(self, base_path=None, ):
         """
         :param base_path: 保存的文件夹，默认为当前文件夹。
         """
         super().__init__()
         self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
         os.makedirs(self.base_path, exist_ok=True)
-        self.agent = agent_class()
-        self.increment_dir = increment_dir if increment_dir else IncrementDir(self.base_path)
+
+        # record current changes immediately
+        # 在代码初始化的时刻就记录代码的改动，否则运行时间较长时，将导致记录错误的记录。
+        self.commit_hash, self.project_root, self.patch_content = self.record_changes()
+        self.patch_time = str(datetime.now())
+
+    @staticmethod
+    def record_changes():
+        # 获取当前的commit hash
+        result = subprocess.run(['git', 'rev-parse', 'HEAD', '--show-toplevel'], stdout=subprocess.PIPE,
+                                encoding='utf-8', text=True)
+        commit_hash, project_root = result.stdout.strip().split('\n')
+
+        # 创建一个patch文件，包含当前改动内容
+        result = subprocess.run(['git', 'diff', 'HEAD'], stdout=subprocess.PIPE,
+                                encoding='utf-8', text=True)
+        patch_content = result.stdout
+        return commit_hash, project_root, patch_content
 
     def cache(self, args_hash: List[Callable[[Any], str]] = None,
               kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]] = None,
-              config: CacheFilenameConfig = CacheFilenameConfig()):
+              config: CacheFilenameConfig = CacheFilenameConfig(),
+              agent=PickleAgent()):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
 
         :param args_hash:
         :param kwargs_hash:
         :param config:
+        :param agent:
         :return:
         """
 
@@ -51,11 +69,11 @@ class FineCache:
                 cache_filename = os.path.join(self.base_path, filename)
                 if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
                     # 从缓存文件获取结果
-                    return self.agent.get(call, cache_filename)
+                    return agent.get(call, cache_filename)
                 else:
                     # 将运行结果缓存到缓存文件中
                     result = call.result
-                    self.agent.set(call, result, cache_filename)
+                    agent.set(call, result, cache_filename)
                     return result
 
             return _get_result
@@ -63,7 +81,8 @@ class FineCache:
         return _cache
 
     @contextmanager
-    def record_context(self, comment: str, tracking_files: List[str] = None, save_output: bool = True):
+    def record_context(self, inc_dir: IncrementDir, comment: str, tracking_files: List[str] = None,
+                       save_output: bool = True):
         """
         :param comment: 注释
         :param tracking_files: 保存的追踪文件
@@ -84,35 +103,23 @@ class FineCache:
                 self.stdout.flush()
                 self.file.flush()
 
-        record_dir = self.increment_dir.create_new_dir(comment)
+        increment_dir = inc_dir if inc_dir else IncrementDir(self.base_path)
+        record_dir = increment_dir.create_new_dir(comment)
         if save_output:
             log_filename = os.path.join(record_dir, 'console.log')
             log_fp = open(log_filename, 'a', encoding='utf-8')
             old_stdout = sys.stdout
             sys.stdout = Tee(old_stdout, log_fp)
 
-        # 获取当前的commit hash
-        result = subprocess.run(['git', 'rev-parse', 'HEAD', '--show-toplevel'], stdout=subprocess.PIPE,
-                                encoding='utf-8', text=True)
-        commit_hash, project_root = result.stdout.strip().split('\n')
-
-        # 创建一个patch文件，包含当前改动内容
-        result = subprocess.run(['git', 'diff', 'HEAD'], stdout=subprocess.PIPE,
-                                encoding='utf-8', text=True)
-        patch_content = result.stdout
-        patch_location = os.path.join(record_dir, 'current_changes.patch')
-        with open(patch_location, 'w', encoding='utf-8') as patch_file:
-            patch_file.write(patch_content)
-
         # 将追踪的文件复制到相应位置
         tracking_files = [] if tracking_files is None else tracking_files
         patterns = [re.compile(p) for p in tracking_files]
         tracking_records = defaultdict(list)
-        for root, dirs, files in os.walk(project_root):
+        for root, dirs, files in os.walk(self.project_root):
             for file in files:
                 # 构建完整的文件路径
                 full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(full_path, project_root)
+                relative_path = os.path.relpath(full_path, self.project_root)
                 for pattern in patterns:
                     # 检查是否匹配正则表达式
                     if pattern.search(file):
@@ -122,11 +129,15 @@ class FineCache:
                         shutil.copy(full_path, record_dir)
                         logger.debug(f'Recording {full_path} to {record_dir}')
 
-        # 记录信息
+        # 记录改动及信息
+        patch_location = os.path.join(record_dir, 'current_changes.patch')
+        with open(patch_location, 'w', encoding='utf-8') as patch_file:
+            patch_file.write(self.patch_content)
         information = {
-            'commit': commit_hash,
-            'runtime': str(datetime.now()),
-            'project_root': project_root
+            'commit': self.commit_hash,
+            'run_time': str(datetime.now()),
+            'patch_time': self.patch_time,
+            'project_root': self.project_root
         }
         if len(tracking_records.keys()) > 0:
             information['tracking_records'] = tracking_records
@@ -141,7 +152,8 @@ class FineCache:
             with open(information_filename, 'w', encoding='utf-8') as fp:
                 json.dump(information, fp)
 
-    def record(self, comment: str = "", tracking_files: List[str] = None, save_output: bool = True):
+    def record(self, increment_dir: IncrementDir = None, comment: str = "", tracking_files: List[str] = None,
+               save_output: bool = True):
         """
         保存装饰的函数运行时的代码变更.
         """
@@ -149,9 +161,10 @@ class FineCache:
         def record_decorator(func):
             @wraps(func)
             def new_func(*args, **kwargs):
-                with self.record_context(comment, tracking_files, save_output) as information:
+                with self.record_context(increment_dir, comment, tracking_files, save_output) as information:
                     res = func(*args, **kwargs)
                     information['record_function'] = func.__qualname__
+                    information['run_end_time'] = str(datetime.now())
                 return res
 
             return new_func
