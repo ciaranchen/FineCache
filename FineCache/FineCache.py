@@ -62,24 +62,21 @@ class FineCache:
 
         return _cache
 
-    def record(self, comment: str = "", tracking_files: List[str] = None, save_output: bool = True):
+    @contextmanager
+    def record_context(self, comment: str, tracking_files: List[str] = None, save_output: bool = True):
         """
-        保存装饰的函数运行时的代码变更.
-
-        :param comment:
-        :param tracking_files:
-        :param save_output:
-        :return:
+        :param comment: 注释
+        :param tracking_files: 保存的追踪文件
+        :param save_output: 是否保存输出到单独文件
         """
 
         class Tee:
-            """模仿Linux的tee命令，同时向两个流写入数据"""
-
             def __init__(self, stdout, file):
                 self.stdout = stdout
                 self.file = file
 
             def write(self, data):
+                """"模仿Linux的tee命令，同时向两个流写入数据"""
                 self.stdout.write(data)
                 self.file.write(data)
 
@@ -87,72 +84,74 @@ class FineCache:
                 self.stdout.flush()
                 self.file.flush()
 
-        @contextmanager
-        def duplicate_stdout(file_path):
-            with open(file_path, 'a', encoding='utf-8') as f:
-                old_stdout = sys.stdout
-                sys.stdout = Tee(old_stdout, f)
-                try:
-                    yield
-                finally:
-                    sys.stdout = old_stdout
+        record_dir = self.increment_dir.create_new_dir(comment)
+        if save_output:
+            log_filename = os.path.join(record_dir, 'console.log')
+            log_fp = open(log_filename, 'a', encoding='utf-8')
+            old_stdout = sys.stdout
+            sys.stdout = Tee(old_stdout, log_fp)
 
+        # 获取当前的commit hash
+        result = subprocess.run(['git', 'rev-parse', 'HEAD', '--show-toplevel'], stdout=subprocess.PIPE,
+                                encoding='utf-8', text=True)
+        commit_hash, project_root = result.stdout.strip().split('\n')
+
+        # 创建一个patch文件，包含当前改动内容
+        result = subprocess.run(['git', 'diff', 'HEAD'], stdout=subprocess.PIPE,
+                                encoding='utf-8', text=True)
+        patch_content = result.stdout
+        patch_location = os.path.join(record_dir, 'current_changes.patch')
+        with open(patch_location, 'w', encoding='utf-8') as patch_file:
+            patch_file.write(patch_content)
+
+        # 将追踪的文件复制到相应位置
         tracking_files = [] if tracking_files is None else tracking_files
+        patterns = [re.compile(p) for p in tracking_files]
+        tracking_records = defaultdict(list)
+        for root, dirs, files in os.walk(project_root):
+            for file in files:
+                # 构建完整的文件路径
+                full_path = os.path.join(root, file)
+                relative_path = os.path.relpath(full_path, project_root)
+                for pattern in patterns:
+                    # 检查是否匹配正则表达式
+                    if pattern.search(file):
+                        # 记录匹配文件的位置
+                        tracking_records[pattern].append(relative_path)
+                        # 复制文件
+                        shutil.copy(full_path, record_dir)
+                        logger.debug(f'Recording {full_path} to {record_dir}')
+
+        # 记录信息
+        information = {
+            'commit': commit_hash,
+            'runtime': str(datetime.now()),
+            'project_root': project_root
+        }
+        if len(tracking_records.keys()) > 0:
+            information['tracking_records'] = tracking_records
+        try:
+            yield information  # 允许修改information内容
+        finally:
+            if save_output:
+                # 关闭文件接口；恢复stdout
+                log_fp.close()
+                sys.stdout = old_stdout
+            information_filename = os.path.join(record_dir, 'information.json')
+            with open(information_filename, 'w', encoding='utf-8') as fp:
+                json.dump(information, fp)
+
+    def record(self, comment: str = "", tracking_files: List[str] = None, save_output: bool = True):
+        """
+        保存装饰的函数运行时的代码变更.
+        """
 
         def record_decorator(func):
             @wraps(func)
             def new_func(*args, **kwargs):
-                record_dir = self.increment_dir.create_new_dir(comment)
-                # 保存输出至文件
-                if save_output:
-                    log_filename = os.path.join(record_dir, 'console.log')
-                    with duplicate_stdout(log_filename):
-                        res = func(*args, **kwargs)
-                else:
+                with self.record_context(comment, tracking_files, save_output) as information:
                     res = func(*args, **kwargs)
-
-                # 获取当前的commit hash
-                result = subprocess.run(['git', 'rev-parse', 'HEAD', '--show-toplevel'], stdout=subprocess.PIPE,
-                                        encoding='utf-8', text=True)
-                commit_hash, project_root = result.stdout.strip().split('\n')
-
-                # 创建一个patch文件，包含当前改动内容
-                result = subprocess.run(['git', 'diff', 'HEAD'], stdout=subprocess.PIPE,
-                                        encoding='utf-8', text=True)
-                patch_content = result.stdout
-                patch_location = os.path.join(record_dir, 'current_changes.patch')
-                with open(patch_location, 'w', encoding='utf-8') as patch_file:
-                    patch_file.write(patch_content)
-
-                # 将追踪的文件复制到相应位置
-                tracking_records = defaultdict(list)
-                for root, dirs, files in os.walk(project_root):
-                    for file in files:
-                        # 构建完整的文件路径
-                        full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(full_path, project_root)
-                        for file_pattern in tracking_files:
-                            # 检查是否匹配正则表达式
-                            pattern = re.compile(file_pattern)
-                            if pattern.search(file):
-                                # 记录匹配文件的位置
-                                tracking_records[pattern].append(relative_path)
-                                # 复制文件
-                                shutil.copy(full_path, record_dir)
-                                logger.debug(f'Recording {full_path} to {record_dir}')
-
-                # 记录信息：
-                information = {
-                    'commit': commit_hash,
-                    'runtime': str(datetime.now()),
-                    'record_function': func.__qualname__,
-                    'project_root': project_root
-                }
-                if len(tracking_records.keys()) > 0:
-                    information['tracking_records'] = tracking_records
-                information_filename = os.path.join(record_dir, 'information.json')
-                with open(information_filename, 'w', encoding='utf-8') as fp:
-                    json.dump(information, fp)
+                    information['record_function'] = func.__qualname__
                 return res
 
             return new_func
