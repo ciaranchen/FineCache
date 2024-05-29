@@ -101,7 +101,7 @@ with fc.record_context as info:
 
 > 注意：为了防止运行时间过长导致运行到上下文处时代码已经做了变更。我们将会在FineCache初始化时就记录代码的patch，只是在上下文运行时才写入文件。
 
-#### FineCache.record_context
+#### FineCache.record
 
 此装饰器与record的参数定义完全一致。只是提供不同的使用方式。在`information.json`中会额外写入调用的函数名称及运行结束的时间。
 
