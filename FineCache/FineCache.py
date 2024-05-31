@@ -118,7 +118,7 @@ class FineCache:
         patterns = {re.compile(p): p for p in tracking_files}
         tracking_records = defaultdict(list)
         for root, dirs, files in os.walk(self.project_root):
-            if os.path.samefile(root, self.base_path):
+            if os.path.samefile(root, increment_dir.base_path):
                 dirs[:] = []  # 清空dirs列表以跳过此目录及子目录
                 continue
             for file in files:
