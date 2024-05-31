@@ -81,9 +81,10 @@ class FineCache:
         return _cache
 
     @contextmanager
-    def record_context(self, inc_dir: IncrementDir, comment: str, tracking_files: List[str] = None,
+    def record_context(self, inc_dir: IncrementDir, comment: str = "", tracking_files: List[str] = None,
                        save_output: bool = True):
         """
+        :param inc_dir:
         :param comment: 注释
         :param tracking_files: 保存的追踪文件
         :param save_output: 是否保存输出到单独文件
@@ -113,21 +114,28 @@ class FineCache:
 
         # 将追踪的文件复制到相应位置
         tracking_files = [] if tracking_files is None else tracking_files
-        patterns = [re.compile(p) for p in tracking_files]
+        patterns = {re.compile(p): p for p in tracking_files}
         tracking_records = defaultdict(list)
         for root, dirs, files in os.walk(self.project_root):
+            if os.path.samefile(root, self.base_path):
+                dirs[:] = []  # 清空dirs列表以跳过此目录及子目录
+                continue
             for file in files:
-                # 构建完整的文件路径
-                full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(full_path, self.project_root)
+
                 for pattern in patterns:
                     # 检查是否匹配正则表达式
                     if pattern.search(file):
-                        # 记录匹配文件的位置
-                        tracking_records[pattern].append(relative_path)
+                        # 构建完整的文件路径
+                        full_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(full_path, self.project_root)
+                        # 构造目标文件路径
+                        dest_file_path = os.path.join(record_dir, relative_path)
+                        os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                         # 复制文件
-                        shutil.copy(full_path, record_dir)
-                        logger.debug(f'Recording {full_path} to {record_dir}')
+                        shutil.copy(full_path, dest_file_path)
+                        logger.debug(f'Recording {full_path} to {dest_file_path}')
+                        # 记录匹配文件的位置
+                        tracking_records[patterns[pattern]].append(full_path)
 
         # 记录改动及信息
         patch_location = os.path.join(record_dir, 'current_changes.patch')

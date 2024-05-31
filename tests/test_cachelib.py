@@ -1,6 +1,8 @@
+import json
 import os
 import pickle
 import unittest
+from pathlib import Path
 from shutil import rmtree
 
 from FineCache import FineCache, IncrementDir
@@ -104,27 +106,65 @@ class TestHistoryCache(unittest.TestCase):
         # Clear folders...
         if os.path.exists('.h_cache'):
             rmtree('.h_cache')
+        if os.path.exists('temp.yml'):
+            os.remove('temp.yml')
 
     def setUp(self) -> None:
         self.inc = IncrementDir('.h_cache', dir_prefix='test')
-        self.hc = FineCache('.h_cache', increment_dir=self.inc)
+        self.hc = FineCache('.h_cache')
 
     def test_wrapped(self):
         wrapped = self.hc.record()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
-    def test_output_duplicate(self):
-        @self.hc.record()
+    def test_record_context(self):
+        Path('./temp.yml').touch()
+
         def output():
             print('123456789')
 
-        output()
-        _, latest_dir = self.inc.latest_number
+        with self.hc.record_context(self.inc, comment="test_record_context", tracking_files=[r'.*\.yml']) as info:
+            output()
+            info['output'] = 'abcdefg'
+
+        _, latest_dir = self.inc.latest_dir
+        self.assertTrue('test_record_context' in latest_dir)
         filename = os.path.join('.h_cache', latest_dir, 'console.log')
+        self.assertTrue(os.path.exists(filename))
         with open(filename) as fp:
             content = fp.read()
         self.assertTrue('123456789' in content)
+        filename = os.path.join('.h_cache', latest_dir, 'information.json')
+        self.assertTrue(os.path.exists(filename))
+        with open(filename) as fp:
+            content = fp.read()
+        self.assertTrue('abcdefg' in content)
+        self.assertTrue(os.path.exists(os.path.join('.h_cache', latest_dir, 'tests', 'temp.yml')))
+
+    def test_record(self):
+        Path('./temp.yml').touch()
+
+        @self.hc.record(self.inc, comment="test_record", tracking_files=[r'.*\.yml'])
+        def output():
+            pass
+
+        for _ in range(3):
+            output()
+        num, latest_dir = self.inc.latest_dir
+        self.assertEqual(num, 3)
+        self.assertEqual(len(os.listdir('.h_cache')), 3)
+        self.assertTrue('test_record' in latest_dir)
+
+        filename = os.path.join('.h_cache', latest_dir, 'information.json')
+        self.assertTrue(os.path.exists(filename))
+        with open(filename) as fp:
+            data = json.load(fp)
+        self.assertEqual(data['record_function'], output.__qualname__)
+
+        # 测试是否循环复制了tracking_files
+        self.assertFalse(os.path.exists(os.path.join('.h_cache', latest_dir, 'tests', '.h_cache')))
+        self.assertTrue(os.path.exists(os.path.join('.h_cache', latest_dir, 'tests', 'temp.yml')))
 
 
 if __name__ == '__main__':

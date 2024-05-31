@@ -80,7 +80,7 @@ class IncrementDir:
         self.dir_prefix = dir_prefix
 
     @property
-    def latest_number(self) -> (Optional[int], Optional[str]):
+    def latest_dir(self) -> (Optional[int], Optional[str]):
         """
         返回基础路径下按数字递增命名的最新目录的数字部分。
 
@@ -108,7 +108,7 @@ class IncrementDir:
         :param dir_suffix: 目录名的后缀，默认为空。
         :return: 新创建的目录的完整路径。
         """
-        latest_num, _ = self.latest_number
+        latest_num, _ = self.latest_dir
         new_num = latest_num + 1 if latest_num is not None else 1
         if len(dir_suffix) != 0:
             new_dir_name = f"{self.dir_prefix}{new_num}-{dir_suffix}"
