@@ -69,6 +69,7 @@ class FineCache:
                 cache_filename = os.path.join(self.base_path, filename)
                 if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
                     # 从缓存文件获取结果
+                    logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_filename}')
                     return agent.get(call, cache_filename)
                 else:
                     # 将运行结果缓存到缓存文件中

@@ -1,9 +1,9 @@
 from FineCache import FineCache
 
-pc = FineCache()
+fc = FineCache()
 
 
-@pc.cache()
+@fc.cache()
 def func(a1: int, a2: int, k1="v1", k2="v2"):
     """normal run function"""
     a3 = a1 + 1
