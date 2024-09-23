@@ -122,13 +122,12 @@ class FineCache:
                 dirs[:] = []  # 清空dirs列表以跳过此目录及子目录
                 continue
             for file in files:
-
+                # 构建完整的文件路径
+                full_path = os.path.join(root, file)
+                relative_path = os.path.relpath(full_path, self.project_root)
                 for pattern in patterns:
                     # 检查是否匹配正则表达式
-                    if pattern.search(file):
-                        # 构建完整的文件路径
-                        full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(full_path, self.project_root)
+                    if pattern.search(relative_path):
                         # 构造目标文件路径
                         dest_file_path = os.path.join(record_dir, relative_path)
                         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)

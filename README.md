@@ -78,7 +78,7 @@ commit来存储当然不现实。
 
 - `increment_dir`。为record使用的自增目录类，默认为`IncrementDir(self.base_path)`。参见 `IncrementDir` 说明。
 - `comment`: 本次实验的注释。将会影响在base_path下生成文件夹的文件名。
-- `tracking_files`: 需要保存的配置文件，或任何其它文件。可以使用正则表达式。
+- `tracking_files`: 需要保存的配置文件，或任何其它文件。可以使用正则表达式匹配直接的相对路径（不含`./`开头）。
 - `save_output`: 是否记录当前装饰函数的stdout。这不会影响原有输出。
 
 上下文管理器在进入和离开时，将在base_path下生成一个文件夹。文件夹中将包含：
