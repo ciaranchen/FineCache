@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class FineCache:
-    def __init__(self, base_path=None, ):
+    def __init__(self, base_path=None):
         """
         :param base_path: 保存的文件夹，默认为当前文件夹。
         """
