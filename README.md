@@ -95,7 +95,7 @@ commit来存储当然不现实。
 上下文管理器的使用例子如下。可以在`info`字典中添加自定义的内容，将会在离开上下文时被一同写入`information.json`。
 
 ```python
-with fc.record_context as info:
+with fc.record_context() as info:
     pass  # do something.
 ```
 
@@ -103,7 +103,13 @@ with fc.record_context as info:
 
 #### FineCache.record
 
-此装饰器与record的参数定义完全一致。只是提供不同的使用方式。在`information.json`中会额外写入调用的函数名称及运行结束的时间。
+```python
+@fc.record()
+def do_something():
+  pass
+```
+
+此装饰器与record_context的参数定义、运行效果一致。只是提供不同的使用方式，并且在`information.json`中会额外写入调用的函数名称及运行结束的时间。
 
 ### 其它说明
 
