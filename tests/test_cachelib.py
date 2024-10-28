@@ -103,7 +103,7 @@ class TestFineCache(unittest.TestCase):
         def test_func(a1, a2):
             return a1, a2
 
-        wrapped = self.fc.cache(args_hash=[lambda a1: 'x', lambda a2: 'y'])(test_func)
+        wrapped = self.fc.cache(lambda f, *a, **kw: f"{f.__name__}('x','y';).pk")(test_func)
         wrapped('a1', 'a2')
         self.assertTrue(os.path.exists(os.path.join('.cache', "test_func('x','y';).pk")))
 

@@ -9,4 +9,4 @@ logger.addHandler(console_handler)
 
 from .FineCache import FineCache
 from .CachedCall import CachedCall, PickleAgent
-from .utils import CacheFilenameConfig, IncrementDir
+from .utils import IncrementDir

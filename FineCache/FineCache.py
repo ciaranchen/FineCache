@@ -8,10 +8,10 @@ from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime
 from functools import wraps
-from typing import Tuple, Callable, Any, List
+from typing import Callable, List
 
 from FineCache.CachedCall import CachedCall, PickleAgent
-from FineCache.utils import IncrementDir, CacheFilenameConfig
+from FineCache.utils import IncrementDir, get_default_filename
 
 import logging
 
@@ -24,7 +24,7 @@ class FineCache:
         :param base_path: 保存的文件夹，默认为当前文件夹。
         """
         super().__init__()
-        self.base_path = base_path if base_path else os.path.abspath(os.getcwd())
+        self.base_path: str = base_path if base_path else os.path.abspath(os.getcwd())
         os.makedirs(self.base_path, exist_ok=True)
 
         # record current changes immediately
@@ -45,16 +45,11 @@ class FineCache:
         patch_content = result.stdout
         return commit_hash, project_root, patch_content
 
-    def cache(self, args_hash: List[Callable[[Any], str]] = None,
-              kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]] = None,
-              config: CacheFilenameConfig = CacheFilenameConfig(),
-              agent=PickleAgent()):
+    def cache(self, hash_func: Callable = None, agent=PickleAgent()):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
 
-        :param args_hash:
-        :param kwargs_hash:
-        :param config:
+        :param hash_func:
         :param agent:
         :return:
         """
@@ -63,8 +58,11 @@ class FineCache:
             @wraps(func)
             def _get_result(*args, **kwargs):
                 call = CachedCall(func, args, kwargs)
-                filename = config.get_filename(call, args_hash=args_hash, kwargs_hash=kwargs_hash)
-                cache_filename = os.path.join(self.base_path, filename)
+                if hash_func is None:
+                    filename = get_default_filename(func, *args, **kwargs)
+                else:
+                    filename = hash_func(func, *args, **kwargs)
+                cache_filename: str = os.path.join(self.base_path, filename)
                 if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
                     # 从缓存文件获取结果
                     logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_filename}')
@@ -121,7 +119,7 @@ class FineCache:
                 continue
             for file in files:
                 # 构建完整的文件路径
-                full_path = os.path.join(root, file)
+                full_path: str = os.path.join(root, file)
                 relative_path = os.path.relpath(full_path, self.project_root)
                 for pattern in patterns:
                     # 检查是否匹配正则表达式
