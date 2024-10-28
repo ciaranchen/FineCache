@@ -35,35 +35,28 @@ func(3, a2=4, k2='v3')
 
 ### 详细说明
 
-#### FineCache(base_path: str, agent_class: PickleAgent)
+#### FineCache(base_path: str)
 
 - base_path。基础缓存目录，默认为当前目录。cache的缓存会生成文件。record将会在目录中生成多个文件夹。
 
-#### FineCache.cache(self, args_hash, kwargs_hash, config = CacheFilenameConfig())
+#### FineCache.cache(self, hash_func: Callable = None, agent=PickleAgent())
 
 在科研项目（尤其是涉及机器学习的项目）中，通常都需要对通用的数据集进行预处理；进行预处理的结果不应该永久保存，而且又应该避免重复调用繁琐的预处理流程。
 
 这个装饰器能缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
 
-- `args_hash: List[Callable[[Any], str]]`  与 `kwargs_hash: List[Callable[[str, Any], Tuple[str, str]]]`。
-  通过这两个参数对函数的参数进行数字摘要，从而确定文件名。默认方法是对参数计算md5值，应该足以应对大多数的情况。
-  如果传入的参数为None，则视为使用参数的__repr__可以部分减少写lambda的麻烦。
+- `hash_func`接受一个函数，控制如何产生的缓存文件名。
+  默认方法是对参数计算md5值，并以`f"{func_name}({str_args};{str_kwargs}).pk"`的方式组装，应该足以应对大多数的情况。
   需要注意的是，类的方法的首个参数是self，即类的对象。下面是一个使用`args_hash`的示例。
 
 ```python
 class DataLoader:
-    ...
-
-    @FineCache().cache(args_hash=[lambda x: 'DataLoader'])
+    @FineCache().cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}()")
     def load(self):
         pass
-# 产生缓存文件 "load('DataLoader';).pk"
-```
 
-- `config` 定义了缓存文件的文件名生成方式。实际上缓存文件名的生成方式是这样调用的。
-
-```python
-config.get_filename(call, args_hash, kwargs_hash)
+# 将产生缓存文件 "DataLoader.load().pk"    
+DataLoader().load()
 ```
 
 - `agent`。为cache所使用的缓存格式，目前仅支持PickleAgent。（对于不支持pickle的函数参数，将会跳过存储；对于不支持pickle
