@@ -1,9 +1,21 @@
+import os
 import unittest
+from shutil import rmtree
 
-from FineCache import FineCache
+from FineCache import FineCache, IncrementDir
 
 
 class TestExperiment(unittest.TestCase):
+    def setUp(self) -> None:
+        # self.fc = FineCache('.exp_log')
+        pass
+
+    def tearDown(self):
+        super().tearDown()
+        # Clear folders...
+        if os.path.exists('.exp_log'):
+            rmtree('.exp_log')
+
     def test_exp(self):
         fc = FineCache('.exp_log')
 
@@ -15,17 +27,20 @@ class TestExperiment(unittest.TestCase):
             def train(self, data):
                 print(f'Train with data {data} ...')
 
-            @fc.record()
+            @fc.record_output()
             def test(self, data):
                 print(f'Test with data {data} ...')
 
         # 主函数
-        trainer = Trainer()
-        train_data, test_data = trainer.load_data
-        trainer.train(train_data)
-        trainer.test(test_data)
+        @fc.record_main()
+        def main():
+            trainer = Trainer()
+            train_data, test_data = trainer.load_data()
+            trainer.train(train_data)
+            trainer.test(test_data)
 
-        # 进行测试
+        # TODO: 进行测试
+        # self.assertEqual()
 
 
 if __name__ == '__main__':

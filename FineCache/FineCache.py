@@ -5,7 +5,7 @@ import json
 import shutil
 import subprocess
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import ContextDecorator
 from datetime import datetime
 from functools import wraps
 from typing import Callable, List
@@ -48,10 +48,6 @@ class FineCache:
     def cache(self, hash_func: Callable = None, agent=PickleAgent()):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
-
-        :param hash_func:
-        :param agent:
-        :return:
         """
 
         def _cache(func: Callable) -> Callable:
@@ -77,38 +73,35 @@ class FineCache:
 
         return _cache
 
-    @contextmanager
-    def record_context(self, inc_dir: IncrementDir, comment: str = "", tracking_files: List[str] = None,
-                       save_output: bool = True):
-        """
-        :param inc_dir:
-        :param comment: 注释
-        :param tracking_files: 保存的追踪文件
-        :param save_output: 是否保存输出到单独文件
-        """
+    def record_main(_self, inc_dir: IncrementDir = None, comment: str = "", tracking_files: List[str] = None):
+        increment_dir = inc_dir if inc_dir else IncrementDir(_self.base_path)
 
-        class Tee:
-            def __init__(self, stdout, file):
-                self.stdout = stdout
-                self.file = file
+        class MainContextDecorator(ContextDecorator):
 
-            def write(self, data):
-                """"模仿Linux的tee命令，同时向两个流写入数据"""
-                self.stdout.write(data)
-                self.file.write(data)
+            def __init__(self):
+                super().__init__()
+                self.increment_dir = increment_dir
 
-            def flush(self):
-                self.stdout.flush()
-                self.file.flush()
+            def __enter__(self):
+                self.record_dir = self.increment_dir.create_new_dir(comment)
 
-        increment_dir = inc_dir if inc_dir else IncrementDir(self.base_path)
-        record_dir = increment_dir.create_new_dir(comment)
-        if save_output:
-            log_filename = os.path.join(record_dir, 'console.log')
-            log_fp = open(log_filename, 'a', encoding='utf-8')
-            old_stdout = sys.stdout
-            sys.stdout = Tee(old_stdout, log_fp)
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                _self.write_information(self.record_dir)
+                _self.copy_files(increment_dir, self.record_dir, tracking_files)
 
+        return MainContextDecorator()
+
+    def write_information(self, record_dir):
+        information = {
+            'commit': self.commit_hash,
+            'patch_time': self.patch_time,
+            'project_root': self.project_root
+        }
+        information_filename = os.path.join(record_dir, 'information.json')
+        with open(information_filename, 'w', encoding='utf-8') as fp:
+            json.dump(information, fp)
+
+    def copy_files(self, increment_dir: IncrementDir, to_dir, tracking_files: List[str] = None):
         # 将追踪的文件复制到相应位置
         tracking_files = [] if tracking_files is None else tracking_files
         patterns = {re.compile(p): p for p in tracking_files}
@@ -125,7 +118,7 @@ class FineCache:
                     # 检查是否匹配正则表达式
                     if pattern.search(relative_path):
                         # 构造目标文件路径
-                        dest_file_path = os.path.join(record_dir, relative_path)
+                        dest_file_path = os.path.join(to_dir, relative_path)
                         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                         # 复制文件
                         shutil.copy(full_path, dest_file_path)
@@ -133,44 +126,42 @@ class FineCache:
                         # 记录匹配文件的位置
                         tracking_records[patterns[pattern]].append(full_path)
 
-        # 记录改动及信息
-        patch_location = os.path.join(record_dir, 'current_changes.patch')
-        with open(patch_location, 'w', encoding='utf-8') as patch_file:
-            patch_file.write(self.patch_content)
-        information = {
-            'commit': self.commit_hash,
-            'run_time': str(datetime.now()),
-            'patch_time': self.patch_time,
-            'project_root': self.project_root
-        }
-        if len(tracking_records.keys()) > 0:
-            information['tracking_records'] = tracking_records
-        try:
-            yield information  # 允许修改information内容
-        finally:
-            if save_output:
-                # 关闭文件接口；恢复stdout
-                log_fp.close()
-                sys.stdout = old_stdout
-            information_filename = os.path.join(record_dir, 'information.json')
-            with open(information_filename, 'w', encoding='utf-8') as fp:
-                json.dump(information, fp)
-
-    def record(self, increment_dir: IncrementDir = None, comment: str = "", tracking_files: List[str] = None,
-               save_output: bool = True):
+    def record_output(_self, increment_dir: IncrementDir = None, comment: str = "", filename: str = "console.log"):
         """
         保存装饰的函数运行时的代码变更.
         """
+        increment_dir = increment_dir if increment_dir else IncrementDir(_self.base_path)
 
-        def record_decorator(func):
-            @wraps(func)
-            def new_func(*args, **kwargs):
-                with self.record_context(increment_dir, comment, tracking_files, save_output) as information:
-                    res = func(*args, **kwargs)
-                    information['record_function'] = func.__qualname__
-                    information['run_end_time'] = str(datetime.now())
-                return res
+        class Tee:
+            def __init__(self, stdout, file):
+                self.stdout = stdout
+                self.file = file
 
-            return new_func
+            def write(self, data):
+                """"模仿Linux的tee命令，同时向两个流写入数据"""
+                self.stdout.write(data)
+                self.file.write(data)
 
-        return record_decorator
+            def flush(self):
+                self.stdout.flush()
+                self.file.flush()
+
+        class RecordDecorator(ContextDecorator):
+            def __init__(self):
+                super().__init__()
+                self.log_filename = None
+                self.log_fp = None
+                self.old_stdout = None
+
+            def __enter__(self):
+                record_dir = increment_dir.create_new_dir(comment)
+                self.log_filename = os.path.join(record_dir, filename)
+                self.log_fp = open(self.log_filename, 'w', encoding='utf-8')
+                self.old_stdout = sys.stdout
+                sys.stdout = Tee(self.old_stdout, self.log_fp)
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                self.log_fp.close()
+                sys.stdout = self.old_stdout
+
+        return RecordDecorator()

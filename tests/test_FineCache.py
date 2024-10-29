@@ -36,7 +36,11 @@ class TestFineCache(unittest.TestCase):
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
-        wrapped = self.fc.record()(func)
+        wrapped = self.fc.record_main()(func)
+        self.assertEqual(wrapped.__qualname__, func.__qualname__)
+        self.assertEqual(wrapped.__doc__, func.__doc__)
+
+        wrapped = self.fc.record_output()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
@@ -109,15 +113,14 @@ class TestFineCache(unittest.TestCase):
 
     # Test for Record
 
-    def test_record_context(self):
-        Path('./temp.yml').touch()
+    def test_record_output(self):
+        # Path('./temp.yml').touch()
 
         def output():
             print('123456789')
 
-        with self.fc.record_context(self.inc, comment="test_record_context", tracking_files=[r'.*\.yml']) as info:
+        with self.fc.record_output(self.inc, comment="test_record_context"):
             output()
-            info['output'] = 'abcdefg'
 
         _, latest_dir = self.inc.latest_dir
         self.assertTrue('test_record_context' in latest_dir)
@@ -126,22 +129,23 @@ class TestFineCache(unittest.TestCase):
         with open(filename) as fp:
             content = fp.read()
         self.assertTrue('123456789' in content)
-        filename = os.path.join('.cache', latest_dir, 'information.json')
-        self.assertTrue(os.path.exists(filename))
-        with open(filename) as fp:
-            content = fp.read()
-        self.assertTrue('abcdefg' in content)
-        self.assertTrue(os.path.exists(os.path.join('.cache', latest_dir, 'tests', 'temp.yml')))
+        # filename = os.path.join('.cache', latest_dir, 'information.json')
+        # self.assertTrue(os.path.exists(filename))
+        # with open(filename) as fp:
+        #     content = fp.read()
+        # self.assertTrue('abcdefg' in content)
+        # self.assertTrue(os.path.exists(os.path.join('.cache', latest_dir, 'tests', 'temp.yml')))
 
-    def test_record(self):
+    def test_main(self):
         Path('./temp.yml').touch()
 
-        @self.fc.record(self.inc, comment="test_record", tracking_files=[r'.*\.yml'])
-        def output():
+        @self.fc.record_main(self.inc, comment="test_record", tracking_files=[r'.*\.yml'])
+        def func():
+            # print('test main func output')
             pass
 
         for _ in range(3):
-            output()
+            func()
         num, latest_dir = self.inc.latest_dir
         self.assertEqual(num, 3)
         self.assertEqual(len(os.listdir('.cache')), 3)
@@ -149,9 +153,6 @@ class TestFineCache(unittest.TestCase):
 
         filename = os.path.join('.cache', latest_dir, 'information.json')
         self.assertTrue(os.path.exists(filename))
-        with open(filename) as fp:
-            data = json.load(fp)
-        self.assertEqual(data['record_function'], output.__qualname__)
 
         # 测试是否循环复制了tracking_files
         self.assertFalse(os.path.exists(os.path.join('.cache', latest_dir, 'tests', '.cache')))
