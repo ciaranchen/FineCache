@@ -9,8 +9,8 @@
 按照预期的方式使用本项目将为每次实验生成单独的文件夹，文件夹中将包含：
 
 - `information.json`: 必要的信息。文件至少包含以下字段，也能存储添加的其它信息。
-    - `commit`: HEAD的commit ID。
-    - `project_root`: git项目的根目录。
+    - `commit`: HEAD的commit ID
+    - `project_root`: git项目的根目录
     - `patch_time`: 记录patch的时间
     - `main_start`: main开始的时间
     - `main_end`: main结束的时间
@@ -18,6 +18,7 @@
 - `console.log`: 记录的被装饰函数的输出。
 - `changes.patch`: 与HEAD的差距patch。
 - 其它 `FineCache.tracking_files` 中记录的文件。
+- 以pickle存储的中间结果文件。
 
 ## 安装
 
@@ -86,7 +87,9 @@ with fc.record():
 
 ### FineCache.cache(self, hash_func: Callable = None, agent=PickleAgent(), record=True)
 
-这个装饰器能缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
+这个装饰器能缓存函数的运行结果和参数。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
+
+缓存结果以文件形式存储在 base_dir 文件夹下。
 
 - `hash_func` 接受一个函数，控制如何产生的缓存文件名。
 
@@ -97,12 +100,12 @@ with fc.record():
 ```python
 # fc = FineCache()
 class DataLoader:
-    @fc.cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}()")
+    @fc.cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}.pk")
     def load(self):
         pass
 
 
-# 将产生缓存文件 "DataLoader.load().pk"
+# 将产生缓存文件 "DataLoader.load.pk"
 DataLoader().load()
 ```
 
@@ -110,7 +113,7 @@ DataLoader().load()
 
   （对于不支持 pickle 的函数参数，将会跳过存储；对于不支持 pickle 的函数运行结果，将会报错。）
 
-- `record` 标识该中间结果文件是否应该存储到实验文件夹中。
+- `record` 标识该缓存文件是否应该复制存储到本次的实验文件夹中。
 
 ### 其它函数
 

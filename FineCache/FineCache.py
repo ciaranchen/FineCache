@@ -70,19 +70,18 @@ class FineCache:
                 else:
                     filename = hash_func(func, *args, **kwargs)
                 cache_filename: str = os.path.join(self.base_path, filename)
-                if record:
-                    # 将中间文件夹复制到文件夹中。
-                    relative_path = os.path.relpath(cache_filename, self.information['project_root'])
-                    self.tracking_files.append(relative_path)
                 if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
                     # 从缓存文件获取结果
                     logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_filename}')
-                    return agent.get(call, cache_filename)
+                    result = agent.get(call, cache_filename)
                 else:
                     # 将运行结果缓存到缓存文件中
                     result = call.result
                     agent.set(call, result, cache_filename)
-                    return result
+                if record:
+                    # 将中间文件夹复制到文件夹中。
+                    shutil.copy(cache_filename, self.dir)
+                return result
 
             return _get_result
 
@@ -92,6 +91,7 @@ class FineCache:
         """
         这个函数应该装饰main函数
         """
+
         class MainContextDecorator(ContextDecorator):
             def __enter__(self):
                 self.record_dir = _self.dir
