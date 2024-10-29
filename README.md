@@ -1,9 +1,23 @@
 # FineCache
 
-科研项目中缓存和实验变动记录工具。主要提供两个装饰器：
+科研项目中缓存和实验变动记录工具。
 
-- `FineCache.cache` : 缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
-- `FineCache.record`: 记录实验进行时的代码改动、配置文件及运行信息。
+在科研项目（尤其是在深度学习项目）中代码运行的时间都比较长，有复杂的数据预处理步骤和诸多配置。我发现自己经常出现实验运行完成后，都忘记自己改了哪些东西。
+
+本项目旨在保存一些项目的基本修改信息，以供分析和复现。
+
+按照预期的方式使用本项目将为每次实验生成单独的文件夹，文件夹中将包含：
+
+- `information.json`: 必要的信息。文件至少包含以下字段，也能存储添加的其它信息。
+    - `commit`: HEAD的commit ID。
+    - `project_root`: git项目的根目录。
+    - `patch_time`: 记录patch的时间
+    - `main_start`: main开始的时间
+    - `main_end`: main结束的时间
+    - `tracking_records`: 额外记录的文件名列表（相对于项目根目录的路径）。
+- `console.log`: 记录的被装饰函数的输出。
+- `changes.patch`: 与HEAD的差距patch。
+- 其它 `FineCache.tracking_files` 中记录的文件。
 
 ## 安装
 
@@ -11,104 +25,101 @@
 pip install FineCache
 ```
 
-## 示例 (FineCache.cache)
+依赖 git。
+
+## 详细说明
+
+### FineCache(self, base_path=None, template: str = "exp{id}", **kwargs)
+
+- `base_path`。基础目录，默认为当前目录。在初始化时，将在 `base_path` 下创建以 `template` 命名自增的实验文件夹，后续在该文件夹下保存内容。
+
+  可用`self.dir`获取创建的实验文件夹。
+
+- `template`。文件夹命名模板字符串。其中`{id}`为自增的序号，可以以str.format的语法插入其它变量，并通过 `**kwargs` 传入具体的参数。
 
 ```python
-from FineCache import FineCache
-
-fc = FineCache()
-
-
-@fc.cache()
-def func(a1: int, a2: int, k1="v1", k2="v2"):
-    """normal run function"""
-    a3 = a1 + 1
-    a4 = a2 + 2
-    kr1, kr2 = k1[::-1], k2[::-1]
-    # print(a1, a2, k1, k2)
-    # print(a1, "+ 1 =", a1 + 1)
-    return a3, a4, kr1, kr2
-
-
-func(3, a2=4, k2='v3')
+fc = FineCache('.exp_log', "exp{id}-{name}", name="DeepLearningModel")
+# 运行一次将产生 `./.exp_log/exp1-DeepLearningModel/`
 ```
 
-### 详细说明
+> 由于需要正则表达式匹配`{id}`以自增，所以应该尽量避免在`{id}`的周围没有间隔符地放入太多其他变量。
 
-#### FineCache(base_path: str)
+### FineCache.information
 
-- base_path。基础缓存目录，默认为当前目录。cache的缓存会生成文件。record将会在目录中生成多个文件夹。
+这个变量是一个Dict，并在 `FineCache.record_main` 结束时保存到文件夹中。
 
-#### FineCache.cache(self, hash_func: Callable = None, agent=PickleAgent())
+在 `FineCache` 初始化时，就已经存储了以下变量：
 
-在科研项目（尤其是涉及机器学习的项目）中，通常都需要对通用的数据集进行预处理；进行预处理的结果不应该永久保存，而且又应该避免重复调用繁琐的预处理流程。
+- `commit`: HEAD的commit ID。
+- `project_root`: git项目的根目录。
+
+在其它函数的使用中，也会向此字典存储相应的变量。
+
+### FineCache.tracking_files
+
+这个变量是一个List，其元素为需要保存的配置文件或任何其它文件。 可以使用正则表达式匹配直接的相对路径（不含`./`开头）。
+
+### FineCache.save_changes(self, filename='changes.patch')
+
+一般认为应该在初始化后立即调用。保存当前代码到HEAD的所有改动到实验文件夹中 filename 对应的文件，并向 `information` 中写入时间。
+
+> 恢复时，首先恢复到 commit ID 对应的提交代码，再使用 `git apply <patch_file>` 命令应用补丁文件。
+
+### FineCache.record(self)
+
+可同时作为装饰器或上下文管理器使用。
+
+```python
+# fc = FineCache()
+@fc.record()
+def main():
+    pass
+
+
+# 或
+with fc.record():
+    pass
+```
+
+一般放在程序的主流程中，记录流程的运行开始时间和结束时间，并在主流程结束后调用 `information` 和 `tracking_files`
+对应的内容写入目录。
+
+### FineCache.cache(self, hash_func: Callable = None, agent=PickleAgent(), record=True)
 
 这个装饰器能缓存函数的运行结果和参数，并且在下次以相同的参数调用时取出返回结果。
 
-- `hash_func`接受一个函数，控制如何产生的缓存文件名。
+- `hash_func` 接受一个函数，控制如何产生的缓存文件名。
+
   默认方法是对参数计算md5值，并以`f"{func_name}({str_args};{str_kwargs}).pk"`的方式组装，应该足以应对大多数的情况。
+
   需要注意的是，类的方法的首个参数是self，即类的对象。下面是一个使用`args_hash`的示例。
 
 ```python
+# fc = FineCache()
 class DataLoader:
-    @FineCache().cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}()")
+    @fc.cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}()")
     def load(self):
         pass
 
-# 将产生缓存文件 "DataLoader.load().pk"    
+
+# 将产生缓存文件 "DataLoader.load().pk"
 DataLoader().load()
 ```
 
-- `agent`。为cache所使用的缓存格式，目前仅支持PickleAgent。（对于不支持pickle的函数参数，将会跳过存储；对于不支持pickle
-  的函数运行结果，将会报错。）
+- `agent` 为cache所使用的缓存格式，目前仅支持PickleAgent。
 
-#### FineCache.record_context(self, increment_dir: IncrementDir = None, comment: str = "", tracking_files: List[str] = None, save_output: bool = True)
+  （对于不支持 pickle 的函数参数，将会跳过存储；对于不支持 pickle 的函数运行结果，将会报错。）
 
-在进行研究的过程中，尝尝出现需要调整参数或者方法的情况，这时就需要保存函数的原始代码。每一次运行的过程改动可能都不大，每次都进行git
-commit来存储当然不现实。
+- `record` 标识该中间结果文件是否应该存储到实验文件夹中。
 
-此上下文管理器能记录实验进行时的代码改动、配置文件及运行信息。参数说明如下。
+### 其它函数
 
-- `increment_dir`。为record使用的自增目录类，默认为`IncrementDir(self.base_path)`。参见 `IncrementDir` 说明。
-- `comment`: 本次实验的注释。将会影响在base_path下生成文件夹的文件名。
-- `tracking_files`: 需要保存的配置文件，或任何其它文件。可以使用正则表达式匹配直接的相对路径（不含`./`开头）。
-- `save_output`: 是否记录当前装饰函数的stdout。这不会影响原有输出。
+#### FineCache.save_console(_self, filename: str = "console.log")
 
-上下文管理器在进入和离开时，将在base_path下生成一个文件夹。文件夹中将包含：
+也可以同时作为装饰器或上下文管理器使用。
 
-- `information.json`: 必要的信息。包含以下字段。
-    - `commit`: HEAD的commit ID。
-    - `project_root`: git项目的根目录。
-    - `patch_time`: 记录current changes的时间
-    - `tracking_records`: 额外记录的文件名列表（相对于项目根目录的路径）。
-- `console.log`: 记录的被装饰函数的输出。
-- `current_changes.patch`: 与HEAD的差距patch。
-- `其它tracking_fiels中记录的文件`。
+在不影响代码段中向stdout的输出的同时，将输出的内容保存到实验文件夹中 filename 对应的文件。
 
-上下文管理器的使用例子如下。可以在`info`字典中添加自定义的内容，将会在离开上下文时被一同写入`information.json`。
+## 示例
 
-```python
-with fc.record_context() as info:
-    pass  # do something.
-```
-
-> 注意：为了防止运行时间过长导致运行到上下文处时代码已经做了变更。我们将会在FineCache初始化时就记录代码的patch，只是在上下文运行时才写入文件。
-
-#### FineCache.record
-
-```python
-@fc.record()
-def do_something():
-  pass
-```
-
-此装饰器与record_context的参数定义、运行效果一致。只是提供不同的使用方式，并且在`information.json`中会额外写入调用的函数名称及运行结束的时间。
-
-### 其它说明
-
-#### IncrementDir(base_path: str, dir_prefix: str = "")
-
-- `base_path`: 基础缓存目录。
-- `dir_prefix`: 生成文件夹名称的前缀。
-
-其生成的文件夹名称为 `{dir_prefix}{num}` 或 `{dir_prefix}{num}-{comment}`。
+参见 `tests/example_*`。
