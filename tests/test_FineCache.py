@@ -34,11 +34,11 @@ class TestFineCache(unittest.TestCase):
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
-        wrapped = self.fc.record_main()(func)
+        wrapped = self.fc.record()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
-        wrapped = self.fc.record_output()(func)
+        wrapped = self.fc.save_console()(func)
         self.assertEqual(wrapped.__qualname__, func.__qualname__)
         self.assertEqual(wrapped.__doc__, func.__doc__)
 
@@ -114,11 +114,11 @@ class TestFineCache(unittest.TestCase):
     def test_record_output(self):
         # Path('./temp.yml').touch()
 
-        @self.fc.record_output('console.log1')
+        @self.fc.save_console('console.log1')
         def output():
             print('123456789')
 
-        with self.fc.record_output('console.log2'):
+        with self.fc.save_console('console.log2'):
             output()
 
         _, latest_dir = self.fc.base_dir.latest
@@ -136,7 +136,7 @@ class TestFineCache(unittest.TestCase):
     def test_main(self):
         self.fc.information['test'] = 'random text'
 
-        @self.fc.record_main()
+        @self.fc.record()
         def func():
             # print('test main func output')
             pass
@@ -160,7 +160,7 @@ class TestFineCache(unittest.TestCase):
             fc = FineCache(base_path)
             fc.tracking_files.append(r'.*\.yaml')
 
-            @fc.record_main()
+            @fc.record()
             def func():
                 pass
 

@@ -18,6 +18,7 @@ class TestExperiment(unittest.TestCase):
 
     def test_exp(self):
         fc = FineCache('.exp_log', "exp{id}-{name}", name="DeepLearningModel")
+        fc.save_changes('changes.patch')
 
         class Trainer:
             @fc.cache()
@@ -27,12 +28,12 @@ class TestExperiment(unittest.TestCase):
             def train(self, data):
                 print(f'Train with data {data} ...')
 
-            @fc.record_output()
+            @fc.save_console()
             def test(self, data):
                 print(f'Test with data {data} ...')
 
         # 主函数
-        @fc.record_main()
+        @fc.record()
         def main():
             trainer = Trainer()
             train_data, test_data = trainer.load_data()
