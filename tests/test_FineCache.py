@@ -20,16 +20,14 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
 
 class TestFineCache(unittest.TestCase):
     def setUp(self) -> None:
-        self.inc = IncrementDir('.cache', dir_prefix='test')
-        self.fc = FineCache('.cache')
+        self.base_path_name = '.cache'
+        self.fc = FineCache(self.base_path_name, "", "test{id}")
 
     def tearDown(self):
         super().tearDown()
         # Clear folders...
-        if os.path.exists('.cache'):
-            rmtree('.cache')
-        if os.path.exists('temp.yml'):
-            os.remove('temp.yml')
+        if os.path.exists(self.base_path_name):
+            rmtree(self.base_path_name)
 
     def test_wrapped(self):
         wrapped = self.fc.cache()(func)
@@ -64,9 +62,9 @@ class TestFineCache(unittest.TestCase):
         wrapped = self.fc.cache()(_test_unpicklable)
         wrapped(*args, **kwargs)
 
-        filepaths = [file for file in os.listdir('.cache') if file.startswith(_test_unpicklable.__name__)]
+        filepaths = [file for file in os.listdir(self.base_path_name) if file.startswith(_test_unpicklable.__name__)]
         self.assertEqual(len(filepaths), 1)
-        with open(os.path.join('.cache', filepaths[0]), 'rb') as fp:
+        with open(os.path.join(self.base_path_name, filepaths[0]), 'rb') as fp:
             data = pickle.load(fp)
         self.assertEqual(data['func'], _test_unpicklable.__qualname__)
 
@@ -116,47 +114,67 @@ class TestFineCache(unittest.TestCase):
     def test_record_output(self):
         # Path('./temp.yml').touch()
 
+        @self.fc.record_output('console.log1')
         def output():
             print('123456789')
 
-        with self.fc.record_output(self.inc, comment="test_record_context"):
+        with self.fc.record_output('console.log2'):
             output()
 
-        _, latest_dir = self.inc.latest_dir
-        self.assertTrue('test_record_context' in latest_dir)
-        filename = os.path.join('.cache', latest_dir, 'console.log')
-        self.assertTrue(os.path.exists(filename))
-        with open(filename) as fp:
-            content = fp.read()
-        self.assertTrue('123456789' in content)
-        # filename = os.path.join('.cache', latest_dir, 'information.json')
-        # self.assertTrue(os.path.exists(filename))
-        # with open(filename) as fp:
-        #     content = fp.read()
-        # self.assertTrue('abcdefg' in content)
-        # self.assertTrue(os.path.exists(os.path.join('.cache', latest_dir, 'tests', 'temp.yml')))
+        _, latest_dir = self.fc.base_dir.latest
+
+        def check_filename(name):
+            filename = os.path.join('.cache', latest_dir, name)
+            self.assertTrue(os.path.exists(filename))
+            with open(filename) as fp:
+                content = fp.read()
+            self.assertTrue('123456789' in content)
+
+        check_filename('console.log1')
+        check_filename('console.log2')
 
     def test_main(self):
-        Path('./temp.yml').touch()
+        self.fc.information['test'] = 'random text'
 
-        @self.fc.record_main(self.inc, comment="test_record", tracking_files=[r'.*\.yml'])
+        @self.fc.record_main()
         def func():
             # print('test main func output')
             pass
 
-        for _ in range(3):
-            func()
-        num, latest_dir = self.inc.latest_dir
-        self.assertEqual(num, 3)
-        self.assertEqual(len(os.listdir('.cache')), 3)
-        self.assertTrue('test_record' in latest_dir)
-
+        func()
+        _, latest_dir = self.fc.base_dir.latest
         filename = os.path.join('.cache', latest_dir, 'information.json')
         self.assertTrue(os.path.exists(filename))
+        with open(filename) as fp:
+            content = json.load(fp)
+        self.assertTrue('test' in content)
+        self.assertTrue('random text' == content['test'])
 
-        # 测试是否循环复制了tracking_files
-        self.assertFalse(os.path.exists(os.path.join('.cache', latest_dir, 'tests', '.cache')))
-        self.assertTrue(os.path.exists(os.path.join('.cache', latest_dir, 'tests', 'temp.yml')))
+    def test_tracking_files(self):
+        base_path = '.test_tracking'
+        touch_file = 'temp.yaml'
+
+        Path(touch_file).touch()
+
+        for i in range(3):
+            fc = FineCache(base_path, "", "test{id}")
+            fc.tracking_files.append(r'.*\.yaml')
+
+            @fc.record_main()
+            def func():
+                pass
+
+            func()
+
+            num, latest_dir = fc.base_dir.latest
+            self.assertEqual(num, i + 1)
+            self.assertEqual(len(os.listdir(base_path)), i + 1)
+            # 测试是否循环复制了tracking_files
+            self.assertFalse(os.path.exists(os.path.join(base_path, latest_dir, 'tests', '.cache')))
+            self.assertTrue(os.path.exists(os.path.join(base_path, latest_dir, 'tests', touch_file)))
+        # end test
+        rmtree(base_path)
+        os.remove(touch_file)
 
 
 if __name__ == '__main__':

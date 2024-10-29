@@ -3,6 +3,9 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class HashFunc:
@@ -27,51 +30,57 @@ def get_default_filename(func, *args, **kwargs):
 
 
 class IncrementDir:
-    def __init__(self, base_path: str, dir_prefix: str = ""):
+    def __init__(self, base_path: str, template: str = "exp{id}_{name}"):
         """
-        初始化IncrementDir类，接收基础路径和目录前缀作为参数。
+        初始化IncrementDir类。
 
         :param base_path: 基础目录路径。
-        :param dir_prefix: 目录名的前缀。
+        :param template: 匹配和生成文件名的模板字符串。
         """
         self.base_path = Path(base_path)
-        self.dir_prefix = dir_prefix
+        if not self.base_path.exists():
+            self.base_path.mkdir(exist_ok=True)
+        assert "{id}" in template
+        self.template = template
+        logger.debug(f"Increment Dir: {self.base_path.absolute()}")
 
     @property
-    def latest_dir(self) -> (Optional[int], Optional[str]):
+    def latest(self) -> (Optional[int], Optional[str]):
         """
-        返回基础路径下按数字递增命名的最新目录的数字部分。
+        返回基础路径下按数字递增命名的最新文件的数字部分。
 
         :return: 最新目录的数字部分及最新目录名，如果找不到则返回None, None。
         """
-        dirs = [d for d in os.listdir(self.base_path) if
-                os.path.isdir(os.path.join(self.base_path, d)) and d.startswith(self.dir_prefix)]
-        # 筛选出符合前缀且剩余部分为数字的目录，并排序
-        suffix_dirs = [d[len(self.dir_prefix):] for d in dirs]
-        numeric_parts = []
-        for d in suffix_dirs:
-            m = re.match(r'\d+', d)
-            if m:
-                numeric_parts.append((int(m.group(0)), self.dir_prefix + d))
+        pattern_str = re.sub(r"\{id}", lambda _: r"(?P<id>\d+)", self.template)
+        pattern_str = re.sub(r'\{.*}', '(.*)', pattern_str)
+        pattern = re.compile(pattern_str)
+        dirs = []
+        for d in os.listdir(self.base_path):
+            res = re.match(pattern, d)
+            if res:
+                dirs.append((res.group('id'), d))
         # 返回最大的数字部分，如果列表为空，则返回None
-        if len(numeric_parts) == 0:
+        if len(dirs) == 0:
             return None, None
+        number_dirs = [(int(_id), d) for _id, d in dirs]
+        return max(number_dirs, key=lambda x: x[0])
 
-        return max(numeric_parts, key=lambda x: x[0])
-
-    def create_new_dir(self, dir_suffix: str = "") -> str:
+    def new_name(self, *args, **kwargs):
         """
-        创建一个新的目录，目录名基于当前最大数字加一，包含自定义的前缀和后缀。
+        args 和 kwargs 为模板字符串使用 str.format 的参数，不包括 {id} 参数。
 
-        :param dir_suffix: 目录名的后缀，默认为空。
-        :return: 新创建的目录的完整路径。
+        :return: 应新建的文件名
         """
-        latest_num, _ = self.latest_dir
-        new_num = latest_num + 1 if latest_num is not None else 1
-        if len(dir_suffix) != 0:
-            new_dir_name = f"{self.dir_prefix}{new_num}-{dir_suffix}"
+        latest_id, _ = self.latest
+        if latest_id:
+            new_id = latest_id + 1
         else:
-            new_dir_name = f"{self.dir_prefix}{new_num}"
-        new_dir_path = self.base_path / new_dir_name
-        new_dir_path.mkdir(exist_ok=True)
-        return str(new_dir_path)
+            new_id = 1
+        template_str = self.template.replace('{id}', str(new_id))
+        return template_str.format(*args, **kwargs, id=new_id)
+
+    def new_path(self, *args, **kwargs):
+        """
+        :return: 应新建的文件路径
+        """
+        return self.base_path / self.new_name(*args, **kwargs)
