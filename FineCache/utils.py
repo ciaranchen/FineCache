@@ -30,7 +30,7 @@ def get_default_filename(func, *args, **kwargs):
 
 
 class IncrementDir:
-    def __init__(self, base_path: str, template: str = "exp{id}_{name}"):
+    def __init__(self, base_path: str, template: str):
         """
         初始化IncrementDir类。
 
@@ -77,7 +77,7 @@ class IncrementDir:
         else:
             new_id = 1
         template_str = self.template.replace('{id}', str(new_id))
-        return template_str.format(*args, **kwargs, id=new_id)
+        return template_str.format(*args, **kwargs)
 
     def new_path(self, *args, **kwargs):
         """

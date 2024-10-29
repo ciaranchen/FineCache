@@ -17,7 +17,7 @@ class TestExperiment(unittest.TestCase):
             rmtree('.exp_log')
 
     def test_exp(self):
-        fc = FineCache('.exp_log', "DeepLearningModel")
+        fc = FineCache('.exp_log', "exp{id}-{name}", name="DeepLearningModel")
 
         class Trainer:
             @fc.cache()

@@ -19,18 +19,18 @@ logger = logging.getLogger(__name__)
 
 
 class FineCache:
-    def __init__(self, base_path=None, exp_name: str = "", template: str = "exp{id}-{name}"):
+    def __init__(self, base_path=None, template: str = "exp{id}", **kwargs):
         """
 
         :param base_path: 保存的文件夹，默认为当前文件夹。
-        :param exp_name: 实验名称。
+        :param template: IncrementDir的模板串。
         """
         super().__init__()
         self.base_path: str = base_path if base_path else os.path.abspath(os.getcwd())
         os.makedirs(self.base_path, exist_ok=True)
 
         self.base_dir = IncrementDir(self.base_path, template)
-        self.dir = self.base_dir.new_path(name=exp_name)
+        self.dir = self.base_dir.new_path(**kwargs)
         os.makedirs(self.dir, exist_ok=True)
 
         self.tracking_files = []

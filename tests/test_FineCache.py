@@ -21,7 +21,7 @@ def func(a1: int, a2: int, k1="v1", k2="v2"):
 class TestFineCache(unittest.TestCase):
     def setUp(self) -> None:
         self.base_path_name = '.cache'
-        self.fc = FineCache(self.base_path_name, "", "test{id}")
+        self.fc = FineCache(self.base_path_name, "test{id}")
 
     def tearDown(self):
         super().tearDown()
@@ -157,7 +157,7 @@ class TestFineCache(unittest.TestCase):
         Path(touch_file).touch()
 
         for i in range(3):
-            fc = FineCache(base_path, "", "test{id}")
+            fc = FineCache(base_path)
             fc.tracking_files.append(r'.*\.yaml')
 
             @fc.record_main()
