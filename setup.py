@@ -5,10 +5,10 @@ with open("README.md", "r", encoding='utf-8') as fh:
 
 setuptools.setup(
   name="FineCache",
-  version="0.1.6",
+  version="0.2.0",
   author="Ciaran Chen",
   author_email="ciaranchen@qq.com",
-  description="科研项目中缓存和实验变动记录工具 ",
+  description="科研项目中实验记录工具 ",
   long_description=long_description,
   long_description_content_type="text/markdown",
   url="https://github.com/ciaranchen/FineCache",

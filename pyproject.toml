@@ -1,7 +1,7 @@
 [project]
 name = "FineCache"
-version = "0.1.6"
-description = "科研项目中缓存和实验变动记录工具"
+version = "0.2.0"
+description = "科研项目中实验记录工具"
 authors = [
     {name = "ciaranchen", email = "ciaranchen@qq.com"},
 ]
