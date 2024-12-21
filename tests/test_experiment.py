@@ -58,8 +58,6 @@ class TestExperiment(unittest.TestCase):
             text = fp.read()
         self.assertEqual(text.strip(), 'Test with data [5, 1, 4] ...')
 
-        base_cache_path = os.path.join('.exp_log', 'Trainer.load_data.pk')
-        self.assertTrue(os.path.exists(base_cache_path))
         exp_cache_path = os.path.join(exp_dir, 'Trainer.load_data.pk')
         self.assertTrue(os.path.exists(exp_cache_path))
 

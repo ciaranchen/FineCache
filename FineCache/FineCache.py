@@ -4,6 +4,7 @@ import re
 import json
 import shutil
 import subprocess
+import types
 from collections import defaultdict
 from contextlib import ContextDecorator
 from datetime import datetime
@@ -56,34 +57,45 @@ class FineCache:
             patch_file.write(patch_content)
         self.information['patch_time'] = str(datetime.now())
 
-    def cache(self, hash_func: Callable = None, agent=PickleAgent(), record=True):
+    def cache(self, hash_func: Callable = get_default_filename):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
         """
 
         def _cache(func: Callable) -> Callable:
-            @wraps(func)
-            def _get_result(*args, **kwargs):
-                call = CachedCall(func, args, kwargs)
-                if hash_func is None:
-                    filename = get_default_filename(func, *args, **kwargs)
-                else:
-                    filename = hash_func(func, *args, **kwargs)
-                cache_filename: str = os.path.join(self.base_path, filename)
-                if os.path.exists(cache_filename) and os.path.isfile(cache_filename):
-                    # 从缓存文件获取结果
-                    logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_filename}')
-                    result = agent.get(call, cache_filename)
-                else:
-                    # 将运行结果缓存到缓存文件中
-                    result = call.result
-                    agent.set(call, result, cache_filename)
-                if record:
-                    # 将中间文件夹复制到文件夹中。
-                    shutil.copy(cache_filename, self.dir)
-                return result
+            class CallableWrapper:
+                def __init__(_self, hash_func):
+                    super().__init__()
+                    _self.hash_func = hash_func
+                    _self.fine_cache = self
+                    _self.agent = PickleAgent()
+                    _self.save_in_dir = True
 
-            return _get_result
+                @wraps(func)
+                def __call__(_self, *args, **kwargs):
+                    call = CachedCall(func, args, kwargs)
+                    _filename = _self.hash_func(func, *args, **kwargs)
+                    if _self.save_in_dir:
+                        cache_path = os.path.join(_self.fine_cache.dir, _filename)
+                    else:
+                        cache_path = _filename
+                    if os.path.exists(cache_path) and os.path.isfile(cache_path):
+                        # 从缓存文件获取结果
+                        logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_path}')
+                        result = _self.agent.get(call, cache_path)
+                    else:
+                        # 将运行结果缓存到缓存文件中
+                        result = call.result
+                        _self.agent.set(call, result, cache_path)
+                    return result
+
+                def __get__(self, instance, owner):
+                    if instance is None:
+                        return self
+                    else:
+                        return types.MethodType(self.__call__, instance)
+
+            return CallableWrapper(hash_func)
 
         return _cache
 
