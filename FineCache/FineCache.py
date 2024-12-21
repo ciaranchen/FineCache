@@ -57,7 +57,7 @@ class FineCache:
             patch_file.write(patch_content)
         self.information['patch_time'] = str(datetime.now())
 
-    def cache(self, hash_func: Callable = get_default_filename):
+    def cache(self, filepath_hash: Callable = get_default_filename):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
         """
@@ -66,7 +66,7 @@ class FineCache:
             class CallableWrapper:
                 def __init__(_self, hash_func):
                     super().__init__()
-                    _self.hash_func = hash_func
+                    _self.filepath_hash = hash_func
                     _self.fine_cache = self
                     _self.agent = PickleAgent()
                     _self.save_in_dir = True
@@ -74,7 +74,7 @@ class FineCache:
                 @wraps(func)
                 def __call__(_self, *args, **kwargs):
                     call = CachedCall(func, args, kwargs)
-                    _filename = _self.hash_func(func, *args, **kwargs)
+                    _filename = _self.filepath_hash(func, *args, **kwargs)
                     if _self.save_in_dir:
                         cache_path = os.path.join(_self.fine_cache.dir, _filename)
                     else:
@@ -95,7 +95,7 @@ class FineCache:
                     else:
                         return types.MethodType(self.__call__, instance)
 
-            return CallableWrapper(hash_func)
+            return CallableWrapper(filepath_hash)
 
         return _cache
 
