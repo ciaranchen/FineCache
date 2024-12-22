@@ -85,22 +85,25 @@ with fc.record():
 一般放在程序的主流程中，记录流程的运行开始时间和结束时间，并在主流程结束后调用 `information` 和 `tracking_files`
 对应的内容写入目录。
 
-### FineCache.cache(self, hash_func: Callable = None, agent=PickleAgent(), record=True)
+### FineCache.cache(self, filepath_hash: Callable = None, in_dir=True)
 
 这个装饰器能缓存函数的运行结果和参数。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
 
-缓存结果以文件形式存储在 base_dir 文件夹下。
+缓存结果默认以pickle文件形式存储在 dir 文件夹下。
 
-- `hash_func` 接受一个函数，控制如何产生的缓存文件名。
+- `filepath_hash` 接受一个函数，控制如何产生的缓存文件名。当设置 `in_dir` 时，指定缓存文件的完整路径。
 
   默认方法是对参数计算md5值，并以`f"{func_name}({str_args};{str_kwargs}).pk"`的方式组装，应该足以应对大多数的情况。
 
   需要注意的是，类的方法的首个参数是self，即类的对象。下面是一个使用`args_hash`的示例。
 
+- `in_dir`。默认为`True`。即保存是否保存到FineCache对象的dir文件夹下。如果设置为`False`，则保存到仅由`filepath_hash`
+  指定的路径中。
+
 ```python
 # fc = FineCache()
 class DataLoader:
-    @fc.cache(hash_func=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}.pk")
+    @fc.cache(filepath_hash=lambda f, *a, **kw: f"{a[0].__class__.__name__}.{f.__name__}.pk")
     def load(self):
         pass
 
@@ -109,11 +112,14 @@ class DataLoader:
 DataLoader().load()
 ```
 
-- `agent` 为cache所使用的缓存格式，目前仅支持PickleAgent。
+Note: 所使用的缓存格式，目前仅支持用Pickle的形式进行存储。对于不支持 pickle 的函数参数，将会跳过存储；对于不支持 pickle
+的函数运行结果，将会报错。
 
-  （对于不支持 pickle 的函数参数，将会跳过存储；对于不支持 pickle 的函数运行结果，将会报错。）
+cache后的函数可以动态修改其中的参数；其可修改的参数定义如下：
 
-- `record` 标识该缓存文件是否应该复制存储到本次的实验文件夹中。
+- `filepath_hash`和`in_dir`。等同于cache的参数。
+- `agent`。默认为PickleAgent。具体请查看 `FineCache/CachedCall.py` 中的定义。
+- `fine_cache`。是对FineCache对象的映射。
 
 ### 其它函数
 
