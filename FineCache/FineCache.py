@@ -43,7 +43,13 @@ class FineCache:
         self.information['commit'] = commit_hash
         self.information['project_root'] = project_root
 
-    def save_changes(self, filename='changes.patch'):
+    def _location(self, filename, in_dir):
+        if in_dir:
+            return os.path.join(self.dir, filename)
+        else:
+            return filename
+
+    def save_changes(self, filename='changes.patch', in_dir=True):
         """
         最好在代码初始化的时刻就记录代码的改动，否则运行时间较长时，将导致记录错误的记录。
         """
@@ -52,12 +58,12 @@ class FineCache:
                                 encoding='utf-8', text=True)
         patch_content = result.stdout
         # 记录改动及信息
-        patch_location = os.path.join(self.dir, filename)
+        patch_location = self._location(filename, in_dir)
         with open(patch_location, 'w', encoding='utf-8') as patch_file:
             patch_file.write(patch_content)
         self.information['patch_time'] = str(datetime.now())
 
-    def cache(self, filepath_hash: Callable = get_default_filename, in_dir=True):
+    def cache(self, filename_hash: Callable = get_default_filename, in_dir=True):
         """
         缓存装饰函数的调用结果。每次调用时，检查是否存在已缓存结果，如果存在则直接给出缓存结果。
         """
@@ -66,7 +72,7 @@ class FineCache:
             class CallableWrapper:
                 def __init__(_self, hash_func):
                     super().__init__()
-                    _self.filepath_hash = hash_func
+                    _self.filename_hash = hash_func
                     _self.fine_cache = self
                     _self.agent = PickleAgent()
                     _self.in_dir = in_dir
@@ -74,19 +80,16 @@ class FineCache:
                 @wraps(func)
                 def __call__(_self, *args, **kwargs):
                     call = CachedCall(func, args, kwargs)
-                    _filename = _self.filepath_hash(func, *args, **kwargs)
-                    if _self.in_dir:
-                        cache_path = os.path.join(_self.fine_cache.dir, _filename)
-                    else:
-                        cache_path = _filename
-                    if os.path.exists(cache_path) and os.path.isfile(cache_path):
+                    _filename = _self.filename_hash(func, *args, **kwargs)
+                    cache_location = _self.fine_cache._location(_filename, _self.in_dir)
+                    if os.path.exists(cache_location) and os.path.isfile(cache_location):
                         # 从缓存文件获取结果
-                        logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_path}')
-                        result = _self.agent.get(call, cache_path)
+                        logger.warning(f'Acquire cached {func.__qualname__} result from: {cache_location}')
+                        result = _self.agent.get(call, cache_location)
                     else:
                         # 将运行结果缓存到缓存文件中
                         result = call.result
-                        _self.agent.set(call, result, cache_path)
+                        _self.agent.set(call, result, cache_location)
                     return result
 
                 def __get__(self, instance, owner):
@@ -95,7 +98,7 @@ class FineCache:
                     else:
                         return types.MethodType(self.__call__, instance)
 
-            return CallableWrapper(filepath_hash)
+            return CallableWrapper(filename_hash)
 
         return _cache
 
@@ -148,7 +151,7 @@ class FineCache:
                         tracking_records[patterns[pattern]].append(full_path)
         return tracking_records
 
-    def save_console(_self, filename: str = "console.log"):
+    def save_console(_self, filename: str = "console.log", in_dir=True):
         """
         将输出保存至文件。（其实使用logging库可能是更好的选择）
         """
@@ -170,14 +173,13 @@ class FineCache:
         class RecordDecorator(ContextDecorator):
             def __init__(self):
                 super().__init__()
-                self.log_filename = None
+                self.log_location = None
                 self.log_fp = None
                 self.old_stdout = None
 
             def __enter__(self):
-                record_dir = _self.dir
-                self.log_filename = os.path.join(record_dir, filename)
-                self.log_fp = open(self.log_filename, 'w', encoding='utf-8')
+                self.log_location = _self._location(filename, in_dir)
+                self.log_fp = open(self.log_location, 'w', encoding='utf-8')
                 self.old_stdout = sys.stdout
                 sys.stdout = Tee(self.old_stdout, self.log_fp)
 
