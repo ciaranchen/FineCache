@@ -176,15 +176,19 @@ class FineCache:
                 self.log_location = None
                 self.log_fp = None
                 self.old_stdout = None
+                self.old_stderr = None
 
             def __enter__(self):
                 self.log_location = _self._location(filename, in_dir)
                 self.log_fp = open(self.log_location, 'w', encoding='utf-8')
                 self.old_stdout = sys.stdout
+                self.old_stderr = sys.stderr
                 sys.stdout = Tee(self.old_stdout, self.log_fp)
+                sys.stderr = Tee(self.old_stderr, self.log_fp)
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 self.log_fp.close()
                 sys.stdout = self.old_stdout
+                sys.stderr = self.old_stderr
 
         return RecordDecorator()

@@ -1,6 +1,9 @@
 import json
 import os
 import pickle
+import asyncio
+import threading
+import tempfile
 import unittest
 from pathlib import Path
 from shutil import rmtree
@@ -175,6 +178,44 @@ class TestFineCache(unittest.TestCase):
         # end test
         rmtree(base_path)
         os.remove(touch_file)
+
+    def test_increment_dir_is_safe_for_concurrent_async_tasks(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        increment_dir = IncrementDir(tmp_dir.name, 'task{id}-{name}')
+
+        async def allocate_path(name):
+            # Run the blocking filesystem operation outside the event-loop thread.
+            return await asyncio.to_thread(increment_dir.new_path, name=name)
+
+        async def allocate_all():
+            return await asyncio.gather(*[allocate_path(f'v{i % 3}') for i in range(20)])
+
+        paths = asyncio.run(allocate_all())
+        numbers = sorted(int(path.name.removeprefix('task').split('-')[0]) for path in paths)
+
+        self.assertEqual(numbers, list(range(1, 21)))
+        self.assertEqual(len({path.name for path in paths}), 20)
+        self.assertTrue(all(path.is_dir() for path in paths))
+
+    def test_increment_dir_unique_id_with_different_custom_names(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        increment_dir = IncrementDir(tmp_dir.name, 'task{id}-{name}')
+        results = []
+
+        def allocate(name):
+            results.append(increment_dir.new_path(name=name))
+
+        threads = [threading.Thread(target=allocate, args=(f'name{i % 2}',)) for i in range(12)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        numbers = sorted(int(path.name.removeprefix('task').split('-')[0]) for path in results)
+        self.assertEqual(numbers, list(range(1, 13)))
+        self.assertEqual(len({path.name for path in results}), 12)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,10 @@
 import hashlib
 import os
 import re
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 import logging
@@ -30,6 +34,10 @@ def get_default_filename(func, *args, **kwargs):
 
 
 class IncrementDir:
+    _process_locks = {}
+    _process_locks_guard = threading.Lock()
+    _lock_stale_seconds = 300
+
     def __init__(self, base_path: str, template: str):
         """
         初始化IncrementDir类。
@@ -38,11 +46,64 @@ class IncrementDir:
         :param template: 匹配和生成文件名的模板字符串。
         """
         self.base_path = Path(base_path)
-        if not self.base_path.exists():
-            self.base_path.mkdir(exist_ok=True)
-        assert "{id}" in template
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        if "{id}" not in template:
+            template = "{id}_" + template
         self.template = template
+        lock_dir = Path(tempfile.gettempdir()) / 'finecache-incrementdir-locks'
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_id = hashlib.sha256(str(self.base_path.absolute()).encode('utf-8')).hexdigest()
+        self._lock_path = lock_dir / f'{lock_id}.lock'
         logger.debug(f"Increment Dir: {self.base_path.absolute()}")
+
+    def _process_lock(self):
+        key = str(self._lock_path.absolute())
+        with self._process_locks_guard:
+            if key not in self._process_locks:
+                self._process_locks[key] = threading.Lock()
+            return self._process_locks[key]
+
+    @contextmanager
+    def _acquire_lock(self):
+        process_lock = self._process_lock()
+        with process_lock:
+            self.base_path.mkdir(parents=True, exist_ok=True)
+            while True:
+                try:
+                    fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    if self._is_lock_stale():
+                        try:
+                            self._lock_path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        continue
+                    time.sleep(0.01)
+                    continue
+
+                with os.fdopen(fd, 'w', encoding='utf-8') as fp:
+                    fp.write(f'pid={os.getpid()}\n')
+                    fp.write(f'time={time.time()}\n')
+                break
+
+            try:
+                yield
+            finally:
+                try:
+                    self._lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def _is_lock_stale(self) -> bool:
+        try:
+            stat = self._lock_path.stat()
+        except FileNotFoundError:
+            return False
+        return (time.time() - stat.st_mtime) > self._lock_stale_seconds
+
+    def _format_name(self, new_id: int, *args, **kwargs):
+        template_str = self.template.replace('{id}', str(new_id))
+        return template_str.format(*args, **kwargs)
 
     @property
     def latest(self) -> (Optional[int], Optional[str]):
@@ -76,11 +137,24 @@ class IncrementDir:
             new_id = latest_id + 1
         else:
             new_id = 1
-        template_str = self.template.replace('{id}', str(new_id))
-        return template_str.format(*args, **kwargs)
+        return self._format_name(new_id, *args, **kwargs)
 
     def new_path(self, *args, **kwargs):
         """
-        :return: 应新建的文件路径
+        返回并预留应新建的目录路径。
+
+        通过一个基于文件系统的锁包住 ``latest`` 读取和目录创建，保证
+        并发调用时每次获取到的 ``id`` 都是唯一的。目录名可以自由包含
+        其他模板参数，不会再因为“路径不同就不冲突”而重复使用同一个编号。
         """
-        return self.base_path / self.new_name(*args, **kwargs)
+        with self._acquire_lock():
+            while True:
+                latest_id, _ = self.latest
+                new_id = (latest_id or 0) + 1
+                path = self.base_path / self._format_name(new_id, *args, **kwargs)
+                try:
+                    path.mkdir()
+                except FileExistsError:
+                    continue
+
+                return path
